@@ -542,6 +542,18 @@ def plot_group_by_timestamp(time_id, files_dict, ext_temp_file):
     # Set x limits on bottom plot (shared x-axis)
     ax[1].set_xlim(left=t[0], right=t[-1])
 
+        # Export folder logic
+    export_dir = Path("exported_graphs")
+    export_dir.mkdir(exist_ok=True)
+
+    output_file = export_dir / f"Group: {time_id} - {len(files_dict)} batteries - Mode: {mode}"
+    if not output_file.exists():
+        plt.savefig(output_file, bbox_inches="tight")
+        print(f"✅ Exported graph to {output_file}")
+    else:
+        print(f"🟡 Skipped export — file already exists: {output_file}")
+
+
 
 def main():
     mode = select_mode()
