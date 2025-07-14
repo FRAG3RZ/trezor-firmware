@@ -158,7 +158,7 @@ def main():
     dut_ctl = None
 
     logging.info("==============================================")
-    logging.info("   Initializing Peripherals                   ")
+    logging.info("           Initializing Peripherals           ")
     logging.info("==============================================")
 
     try:
