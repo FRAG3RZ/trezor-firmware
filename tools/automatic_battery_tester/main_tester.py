@@ -195,7 +195,7 @@ def main():
     ############################################################################
 
     logging.info("==============================================")
-    logging.info("   TEST PLAN LOADING                          ")
+    logging.info("             TEST PLAN LOADING                ")
     logging.info("==============================================")
 
     temperatures = config["test_plan"].get("temperatures_celsius", [25])
