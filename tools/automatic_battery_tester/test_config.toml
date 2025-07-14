@@ -62,6 +62,6 @@ random_wonder_relaxation_time_min = 30
 [notifications]
 notification_channel = "slack"
 
-slack_webhook_url = "<Fill your webhook URL>"
+slack_webhook_url = "https://hooks.slack.com/services/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"
 
 
