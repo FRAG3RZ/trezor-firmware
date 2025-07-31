@@ -148,7 +148,8 @@ def identify_r_int(time: np.ndarray, ibat: np.ndarray, vbat: np.ndarray, temp: n
     vbat_filtered = low_pass_ma_filter(vbat, ma_len=ma_len)
 
     # Filter out signal transitions, use same filter len as for low pass filter
-    i_bat_transitions = find_signal_transitions(ibat_filtered, fir_len=ma_len)
+    # and unfiltered signal identify transitions precisely
+    i_bat_transitions = find_signal_transitions(ibat, fir_len=ma_len)
 
     # Filter out transitions which are too close to the edge and have no left/right offset
     valid_transitions = i_bat_transitions[np.logical_and(i_bat_transitions - offset_left > 0, i_bat_transitions + offset_right < len(ibat))]

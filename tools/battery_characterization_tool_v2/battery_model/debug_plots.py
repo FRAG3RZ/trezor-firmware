@@ -48,12 +48,12 @@ def identify_r_int_debug_plot(time, vbat, ibat, r_int,
     plot_general_config(ax[0], "Battery voltage", "Time [min]", "Voltage [V]")
 
     ax[1].plot(time_to_minutes(time), ibat, label="I_bat")
-    ax[1].plot(time_to_minutes(time[transition_indeces]), ibat[transition_indeces], 'x', markersize=3, color='red', label="Load transitions")
-    ax[1].plot(time_to_minutes(time[transition_indeces_m1]), ibat[transition_indeces_m1], 'x',markersize=3, color='magenta', label="V_t1")
-    ax[1].plot(time_to_minutes(time[transition_indeces_m2]), ibat[transition_indeces_m2], 'x',markersize=3, color='lime', label="V_t2")
+    ax[1].plot(time_to_minutes(time[transition_indeces], time[0]), ibat[transition_indeces], 'x', markersize=3, color='red', label="Load transitions")
+    ax[1].plot(time_to_minutes(time[transition_indeces_m1], time[0]), ibat[transition_indeces_m1], 'x',markersize=3, color='magenta', label="V_t1")
+    ax[1].plot(time_to_minutes(time[transition_indeces_m2], time[0]), ibat[transition_indeces_m2], 'x',markersize=3, color='lime', label="V_t2")
     plot_general_config(ax[1], "Battery current with r_int identification marks", "Time [min]", "Current [mA]")
 
-    ax[2].plot(time_to_minutes(time[transition_indeces]), r_int, marker="o", markersize=3, label="R_int")
+    ax[2].plot(time_to_minutes(time[transition_indeces], time[0]), r_int, marker="o", markersize=3, label="R_int")
     ax[2].axhline(y=r_int_est, color='r', linestyle='--', label=f"identified r_int: {r_int_est:.2f} ohms")
     plot_general_config(ax[2], "R_int estimation", "Time [min]", "Resistance [ohms]")
 
