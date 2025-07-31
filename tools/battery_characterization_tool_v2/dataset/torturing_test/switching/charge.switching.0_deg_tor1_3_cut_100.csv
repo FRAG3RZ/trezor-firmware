@@ -1,0 +1,4 @@
+time,vbat,ibat,ntc_temp,vsys,die_temp,iba_meas_status,buck_status,mode
+0,3.479,-17.325,0.898,4.723,2.333,0x0C,0x0E,CHARGING
+2001,3.484,-17.325,0.788,4.723,3.918,0x0C,0x0E,CHARGING
+4002,3.484,-17.325,0.898,4.723,3.125,0x0C,0x0E,CHARGING
