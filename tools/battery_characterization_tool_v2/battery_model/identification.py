@@ -163,18 +163,18 @@ def identify_r_int(time: np.ndarray, ibat: np.ndarray, vbat: np.ndarray, temp: n
     for i in range(0, len(valid_transitions)):
         r_int[i] = (vbat_filtered[m2_idx[i]] - vbat_filtered[m1_idx[i]]) / ((ibat_filtered[m1_idx[i]])/1000 - (ibat_filtered[m2_idx[i]])/1000)
 
-    # Average the R_int, do not consider the data on edges
-    if(len(r_int) < 5):
-        r_int_est = sum(r_int)/len(r_int)
-    else:
-        r_int_est = sum(r_int[1:-1])/len(r_int[1:-1])
+    # make r_int estimation by averaging the values estimation from every transition, consider only half of the
+    # estimation values from the middle of the waveforms to avoid calculation with the ugly edges of the discharging
+    # profile where r_int drfts away from typial value.
+    r_int_cons_indices = valid_transitions[int(len(valid_transitions)/4):int(len(valid_transitions)*3/4)]
+    r_int_cons = r_int[int(len(valid_transitions)/4):int(len(valid_transitions)*3/4)]
+    r_int_est = sum(r_int_cons)/len(r_int_cons)
 
     if debug:
-        identify_r_int_debug_plot(time, vbat_filtered, ibat_filtered, r_int,
-                                  r_int_est,
-                                  valid_transitions,
-                                  m1_idx,
-                                  m2_idx)
+        identify_r_int_debug_plot(time, vbat_filtered, ibat_filtered,
+                                  valid_transitions, m1_idx, m2_idx,
+                                  r_int, r_int_cons_indices, r_int_cons,
+                                  r_int_est)
     return r_int_est
 
 

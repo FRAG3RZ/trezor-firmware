@@ -32,11 +32,14 @@ def time_to_minutes(time, offset=None):
     else:
         return (time-offset) / 60000
 
-def identify_r_int_debug_plot(time, vbat, ibat, r_int,
-                              r_int_est,
+def identify_r_int_debug_plot(time, vbat, ibat,
                               transition_indeces,
                               transition_indeces_m1,
                               transition_indeces_m2,
+                              r_int,
+                              r_int_cons_indices,
+                              r_int_cons,
+                              r_int_est,
                               name=None):
 
     fig, ax = plt.subplots(3,1)
@@ -54,6 +57,7 @@ def identify_r_int_debug_plot(time, vbat, ibat, r_int,
     plot_general_config(ax[1], "Battery current with r_int identification marks", "Time [min]", "Current [mA]")
 
     ax[2].plot(time_to_minutes(time[transition_indeces], time[0]), r_int, marker="o", markersize=3, label="R_int")
+    ax[2].plot(time_to_minutes(time[r_int_cons_indices], time[0]), r_int_cons, marker="o", markersize=3, label="R_int (cons.)")
     ax[2].axhline(y=r_int_est, color='r', linestyle='--', label=f"identified r_int: {r_int_est:.2f} ohms")
     plot_general_config(ax[2], "R_int estimation", "Time [min]", "Resistance [ohms]")
 

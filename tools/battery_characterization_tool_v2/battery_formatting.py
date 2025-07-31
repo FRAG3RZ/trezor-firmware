@@ -244,7 +244,7 @@ def extract_soc_and_rint_curves(
             linear_discharge = found["linear_discharge"]
             linear_charge = found["linear_charge"]
 
-            R_int_estim_second = identify_r_int(
+            R_int_estim = identify_r_int(
                 switching_discharge.time,
                 switching_discharge.battery_current,
                 switching_discharge.battery_voltage,
@@ -252,17 +252,13 @@ def extract_soc_and_rint_curves(
                 debug=True,
             )
 
-            R_int_estim = estimate_R_int(
-                switching_discharge.time,
-                switching_discharge.battery_current,
-                switching_discharge.battery_voltage,
-                switching_discharge.battery_temp,
-                debug=True,
-            )
-
-            print(f"Estim R int {R_int_estim} vs {R_int_estim_second} ")
-
-            plt.show()
+            # R_int_estim = estimate_R_int(
+            #     switching_discharge.time,
+            #     switching_discharge.battery_current,
+            #     switching_discharge.battery_voltage,
+            #     switching_discharge.battery_temp,
+            #     debug=True,
+            # )
 
             R_int_estim_charge = estimate_R_int(
                 switching_charge.time,
