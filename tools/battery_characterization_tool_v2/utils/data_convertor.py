@@ -145,3 +145,103 @@ def load_measured_data_new(
         ext_temp_time=ext_temp_time_vector,
         ext_temp=ext_temp_vector,
     )
+
+def cut_charging_phase(data):
+    """
+    Isolate the first continuous charging phase from the given dataset and return it as a
+    np.array. Only returns the first continuous set of indices where ibat < 0.
+    """
+
+    # Find all indices where current is negative (charging)
+    # np.where returns a tuple, we want the first (and only) array of indices
+    where_result = np.where(data.ibat < 0)
+    all_charge_indices = where_result[0]
+
+    if len(all_charge_indices) == 0:
+        raise ValueError("No charging phase found in the data (no negative current)")
+
+    # Find the first continuous set of indices
+    # Look for breaks in continuity (where difference > 1)
+    diff = np.diff(all_charge_indices)
+    break_points = np.where(diff > 1)[0]
+
+    if len(break_points) == 0:
+        # All indices are continuous
+        charge_indices = all_charge_indices
+    else:
+        # Take only the first continuous segment
+        first_break = break_points[0]
+        charge_indices = all_charge_indices[:first_break + 1]
+
+    if len(break_points) > 0:
+        print(f"Note: Skipped {len(break_points)} additional charging segments to ensure continuity")
+
+    charge_data = BatteryAnalysisData(
+        time=data.time[charge_indices],
+        power_state=data.power_state[charge_indices],
+        usb=data.usb[charge_indices],
+        wlc=data.wlc[charge_indices],
+        battery_voltage=data.battery_voltage[charge_indices],
+        battery_current=data.battery_current[charge_indices],
+        battery_temp=data.battery_temp[charge_indices],
+        battery_soc=data.battery_soc[charge_indices],
+        battery_soc_latched=data.battery_soc_latched[charge_indices],
+        pmic_die_temp=data.pmic_die_temp[charge_indices],
+        wlc_voltage=data.wlc_voltage[charge_indices],
+        wlc_current=data.wlc_current[charge_indices],
+        wlc_die_temp=data.wlc_die_temp[charge_indices],
+        system_voltage=data.system_voltage[charge_indices],
+        ext_temp_time=data.ext_temp_time[charge_indices] if data.ext_temp_time is not None else None,
+        ext_temp=data.ext_temp[charge_indices] if data.ext_temp is not None else None,
+    )
+
+    # Offset time vector to start at 0
+    charge_data.time = charge_data.time - charge_data.time[0]
+
+    return charge_data
+
+def cut_discharging_phase(data):
+    """
+    Isolate the first continuous discharging phase from the given dataset and return it as a
+    np.array. Only returns the first continuous set of indices where ibat > 0.
+    """
+
+    # Find all indices where current is positive (discharging)
+    where_result = np.where(data.ibat > 0)
+    all_discharge_indices = where_result[0]
+
+    if len(all_discharge_indices) == 0:
+        raise ValueError("No discharging phase found in the data (no positive current)")
+
+    # Find the first continuous set of indices
+    diff = np.diff(all_discharge_indices)
+    break_points = np.where(diff > 1)[0]
+
+    if len(break_points) == 0:
+        discharge_indices = all_discharge_indices
+    else:
+        first_break = break_points[0]
+        discharge_indices = all_discharge_indices[:first_break + 1]
+
+    discharge_data = BatteryAnalysisData(
+            time=data.time[discharge_indices],
+            power_state=data.power_state[discharge_indices],
+            usb=data.usb[discharge_indices],
+            wlc=data.wlc[discharge_indices],
+            battery_voltage=data.battery_voltage[discharge_indices],
+            battery_current=data.battery_current[discharge_indices],
+            battery_temp=data.battery_temp[discharge_indices],
+            battery_soc=data.battery_soc[discharge_indices],
+            battery_soc_latched=data.battery_soc_latched[discharge_indices],
+            pmic_die_temp=data.pmic_die_temp[discharge_indices],
+            wlc_voltage=data.wlc_voltage[discharge_indices],
+            wlc_current=data.wlc_current[discharge_indices],
+            wlc_die_temp=data.wlc_die_temp[discharge_indices],
+            system_voltage=data.system_voltage[discharge_indices],
+            ext_temp_time=data.ext_temp_time[discharge_indices] if data.ext_temp_time is not None else None,
+            ext_temp=data.ext_temp[discharge_indices] if data.ext_temp is not None else None,
+    )
+
+    discharge_data.time = discharge_data.time - discharge_data.time[0]
+
+    return discharge_data

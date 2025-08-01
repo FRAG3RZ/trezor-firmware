@@ -2,17 +2,15 @@ from pathlib import Path
 import numpy as np
 import tomllib
 import sys
-import matplotlib
+import argparse
 import matplotlib.pyplot as plt
 from collections import defaultdict
 from utils.data_filtering import filter_dataset_constants, count_entries
+from utils.data_convertor import cut_charging_phase, cut_discharging_phase
 
-from battery_model import identify_r_int, identify_ocv_curve
+from battery_model import identify_r_int, identify_ocv_curve, fit_ocv_curve
 
 from fuel_gauge.battery_profiling import (
-    estimate_R_int,
-    extract_SoC_curve,
-    extract_SoC_curve_charging,
     rational_fit,
     fit_soc_curve,
     fit_R_int_curve,
@@ -26,30 +24,62 @@ from fuel_gauge.battery_model import (
     save_battery_model_to_json,
 )
 
-# ======CONFIG LOADING ========
+DEFAULT_MAX_CHARGE_VOLTAGE    = 3.9
+DEFAULT_MAX_DISCHARGE_VOLTAGE = 3.0
+DEFAULT_OCV_SAMPLES           = 100
+
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Battery characterization tool for processing battery test data",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+
+    parser.add_argument(
+        "config_file",
+        nargs="?",
+        default=None,
+        help="Path to TOML configuration file (without .toml extension)"
+    )
+
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug output and plots"
+    )
+
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="exported_data",
+        help="Output directory for generated data"
+    )
+
+    return parser.parse_args()
 
 
 def prompt_for_config_file():
+
     config_dir = Path(__file__).parent / "battery_model" / "models"
     toml_files = list(config_dir.glob("*.toml"))
 
     if not toml_files:
-        print("❌ No .toml config files found in 'battery_model/models/.'")
+        print("ERROR: No .toml config files found in 'battery_model/models/.'")
         sys.exit(1)
 
-    print("\n📂 Available config files in 'battery_model/models/.':")
+    print("\nAvailable config files in 'battery_model/models/.':")
     for i, file in enumerate(toml_files, 1):
         print(f"  {i}. {file.name}")
 
     while True:
         try:
-            choice = input("🔧 Enter config name or number: ").strip()
+            choice = input("Enter config name or number: ").strip()
             if choice.isdigit():
                 index = int(choice) - 1
                 if 0 <= index < len(toml_files):
                     return toml_files[index]
                 else:
-                    print("❌ Invalid number.")
+                    print("ERROR: Invalid number.")
             else:
                 file_path = config_dir / (
                     choice if choice.endswith(".toml") else f"{choice}.toml"
@@ -57,9 +87,9 @@ def prompt_for_config_file():
                 if file_path.exists():
                     return file_path
                 else:
-                    print("❌ File not found.")
+                    print("ERROR: File not found.")
         except KeyboardInterrupt:
-            print("\n⛔ Cancelled.")
+            print("\nOperation cancelled.")
             sys.exit(0)
 
 
@@ -68,7 +98,7 @@ def load_config(toml_path):
         with open(toml_path, "rb") as f:
             config = tomllib.load(f)
     except Exception as e:
-        print(f"❌ Failed to load config: {e}")
+        print(f"ERROR: Failed to load config: {e}")
         sys.exit(1)
 
     # Match exact variable names from config
@@ -106,7 +136,7 @@ def extract_file_info(file):
 
 
 # Build the library dataset in the format [battery][time][mode][phase][temp]
-def build_library_dataset():
+def build_library_dataset(dataset_path):
     # Use recursive defaultdicts to build a 5-level nested dict
     library = defaultdict(
         lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
@@ -124,20 +154,19 @@ def build_library_dataset():
         phase = info["phase"]
         temp = info["temp"]
 
-        # ⛔ Skip if the phase is 'done'
+        # Skip if the phase is 'done'
         if phase == "done":
-            print(f"⏭️ Skipping {file.name} — phase is 'done'")
+            print(f"SKIPPING: {file.name} file — with phase 'done'")
             continue
 
         try:
             data = load_measured_data_new(info["path"])
             library[battery][timestamp][mode][phase][temp] = data
         except Exception as e:
-            print(f"⚠️ Failed to load {file.name}: {e}")
+            print(f"WARNING: Failed to load {file.name}: {e}")
 
     print(f"Dataset built with {len(library)} batteries.")
     return library
-
 
 # ========Graphing functions========
 
@@ -146,13 +175,11 @@ def extract_soc_and_rint_curves(
     dataset,
     filter_batteries,
     characterized_temperatures_deg,
-    soc_curve_max_chg_voltage,
-    soc_curve_max_dchg_voltage,
-    soc_curve_points_num,
+    ocv_curve_max_chg_voltage,
+    ocv_curve_max_dchg_voltage,
+    ocv_curve_points_num,
+    debug=False,
 ):
-
-    # ====SET THE DEBUG FLAG FOR EXTRA PRINTS====
-    debug = False
 
     def hash_leaf_file_names(d):
         leaf_keys = []
@@ -185,7 +212,7 @@ def extract_soc_and_rint_curves(
     )
 
     print(
-        f"✅ Dataset contains {count_entries(filtered_dataset)} entries after filtering."
+        f"SUCCESS: Dataset contains {count_entries(filtered_dataset)} entries after filtering."
     )
     file_name_hash = hash_leaf_file_names(filtered_dataset)
     print(f"File names hash: {file_name_hash}")
@@ -224,15 +251,16 @@ def extract_soc_and_rint_curves(
         return found
 
     for temp in characterized_temperatures_deg:
-        print(f"\n🌡️ Processing temperature: {temp}°C")
+
+        print(f"\nProcessing temperature: {temp}°C")
         profiles = []
 
         for battery in sorted(filtered_dataset):
-            print(f"🔋 Processing battery: {battery}")
+            print(f"Processing battery: {battery}")
             found = find_profiles_across_timestamps(battery, temp)
 
             if not all(found.values()):
-                print(f"⚠️ Missing profiles for battery {battery}, temp {temp}:")
+                print(f"WARNING: Missing profiles for battery {battery}, temp {temp}:")
                 for k, v in found.items():
                     if v is None:
                         print(f"  - Missing {k.replace('_', ' ')}")
@@ -244,51 +272,46 @@ def extract_soc_and_rint_curves(
             linear_discharge = found["linear_discharge"]
             linear_charge = found["linear_charge"]
 
+            # Make sure the profile do not have any tails from relaxation phase
+            switching_discharge = cut_discharging_phase(switching_discharge)
+            switching_charge = cut_charging_phase(switching_charge)
+            linear_charge    = cut_charging_phase(linear_charge)
+            linear_discharge = cut_discharging_phase(linear_discharge)
+
             R_int_estim = identify_r_int(
                 switching_discharge.time,
                 switching_discharge.battery_current,
                 switching_discharge.battery_voltage,
                 switching_discharge.battery_temp,
-                debug=True,
+                debug=debug,
             )
 
-            # R_int_estim = estimate_R_int(
-            #     switching_discharge.time,
-            #     switching_discharge.battery_current,
-            #     switching_discharge.battery_voltage,
-            #     switching_discharge.battery_temp,
-            #     debug=True,
-            # )
-
-            R_int_estim_charge = estimate_R_int(
+            R_int_estim_charge = identify_r_int(
                 switching_charge.time,
                 switching_charge.battery_current,
                 switching_charge.battery_voltage,
                 switching_charge.battery_temp,
-                debug=False,
+                debug=debug,
             )
 
-            SoC_curve, total_capacity, effective_capacity = extract_SoC_curve(
-                temp,
-                linear_discharge,
-                R_int_estim,
-                max_chg_voltage=soc_curve_max_chg_voltage,
-                max_dischg_voltage=soc_curve_max_dchg_voltage,
-                num_of_points=soc_curve_points_num,
-                debug=False,
-            )
 
-            SoC_curve_charge, total_capacity_charge, effective_capacity_charge = (
-                extract_SoC_curve_charging(
-                    temp,
-                    linear_charge,
-                    R_int_estim,
-                    max_chg_voltage=3.9,
-                    max_dischg_voltage=3.0,
-                    num_of_points=soc_curve_points_num,
-                    debug=False,
-                )
-            )
+            ocv_curve_discharge, total_capacity, effective_capacity = identify_ocv_curve(linear_discharge.time,
+                                                                                    linear_discharge.battery_voltage,
+                                                                                    linear_discharge.battery_current,
+                                                                                    R_int_estim,
+                                                                                    max_curve_v=ocv_curve_max_chg_voltage,
+                                                                                    min_curve_v=ocv_curve_max_dchg_voltage,
+                                                                                    num_of_samples=ocv_curve_points_num,
+                                                                                    debug=debug)
+
+            ocv_curve_charge, _, effective_capacity_charge = identify_ocv_curve(linear_charge.time,
+                                                                                linear_charge.battery_voltage,
+                                                                                linear_charge.battery_current,
+                                                                                R_int_estim,
+                                                                                max_curve_v=ocv_curve_max_chg_voltage,
+                                                                                min_curve_v=ocv_curve_max_dchg_voltage,
+                                                                                num_of_samples=ocv_curve_points_num,
+                                                                                debug=debug)
 
             mean_temp_discharge, _ = get_mean_temp(switching_discharge.battery_temp)
             r_int_points.append([mean_temp_discharge, R_int_estim])
@@ -302,10 +325,10 @@ def extract_soc_and_rint_curves(
                 "ntc_temp": mean_temp_discharge,
                 "R_int": R_int_estim,
                 "R_int_charge": R_int_estim_charge,
-                "max_chg_voltage": soc_curve_max_chg_voltage,
-                "max_disch_voltage": soc_curve_max_dchg_voltage,
-                "SoC_curve": SoC_curve,
-                "SoC_curve_charge": SoC_curve_charge,
+                "max_chg_voltage": ocv_curve_max_chg_voltage,
+                "max_disch_voltage": ocv_curve_max_dchg_voltage,
+                "SoC_curve": ocv_curve_discharge,
+                "SoC_curve_charge": ocv_curve_charge,
                 "total_capacity": effective_capacity,
                 "total_capacity_charge": effective_capacity_charge,
                 "capacity_yield": total_capacity - effective_capacity,
@@ -314,7 +337,7 @@ def extract_soc_and_rint_curves(
             profiles.append(entry)
 
         if not profiles:
-            print(f"🚫 No usable profiles at {temp}°C")
+            print(f"ERROR: No usable profiles at {temp}°C")
             continue
 
         # Prepare ocv discharge profiles for concatenation and fitting
@@ -336,14 +359,11 @@ def extract_soc_and_rint_curves(
                 np.concatenate([p["SoC_curve_charge"][1] for p in profiles]),
             ]
         )
-        print(ocv_profiles_charge)
+
         # Fit ocv curves on the concatenated data (discharge and charge)
-        curve_params, curve_params_complete = fit_soc_curve(
-            ocv_profiles_discharge, "OCV Discharge"
-        )
-        curve_params_charge, curve_params_charge_complete = fit_soc_curve(
-            ocv_profiles_charge, "OCV Charge"
-        )
+        curve_params, curve_params_complete = fit_ocv_curve(ocv_profiles_discharge)
+        curve_params_charge, curve_params_charge_complete = fit_ocv_curve(ocv_profiles_charge)
+
         """
         # Extract arrays of all ocv curve Y-values (discharge and charge) for averaging & std
         #ocv_discharge_y = np.array([p["SoC_curve"][1] for p in profiles])
@@ -439,17 +459,19 @@ def extract_soc_and_rint_curves(
 
     return ocv_curves, r_int_points, r_int_points_charge, file_name_hash
 
+def main():
+    # Parse command line arguments
+    args = parse_arguments()
 
-if __name__ == "__main__":
+    # Handle config file selection
+    if args.config_file:
+        config_file = Path(args.config_file)
 
-    # Allow: python config_from_toml.py myconfig.toml
-    if len(sys.argv) > 1:
-        toml_file = sys.argv[1]
-        if not toml_file.endswith(".toml"):
-            toml_file += ".toml"
-        config_file_path = Path(toml_file)
+        if not config_file.suffix == ".toml":
+            raise IOError("Config file must be a .toml file")
+
         if not config_file_path.exists():
-            print(f"❌ File '{toml_file}' not found.")
+            print(f"Config file '{config_file}' not found.")
             sys.exit(1)
     else:
         config_file_path = prompt_for_config_file()
@@ -463,25 +485,26 @@ if __name__ == "__main__":
         temperatures_to_process,
     ) = load_config(config_file_path)
 
-    print("✅ Configuration Loaded:")
+    print("SUCCESS: Configuration Loaded:")
     print(f"  Dataset path: {config_file_path}")
     print(f"  Manufacturer: {battery_manufacturer}")
     print(f"  Temperatures: {temperatures_to_process}")
+    print(f"  Output directory: {args.output_dir}")
+    print(f"  Debug mode: {args.debug}")
 
-    dataset = build_library_dataset()
+    dataset = build_library_dataset(dataset_path)
 
     ocv_curves, rint_points, rint_points_charge, file_name_hash = (
         extract_soc_and_rint_curves(
             dataset,
             filter_batteries=batteries_to_process,
             characterized_temperatures_deg=temperatures_to_process,
-            soc_curve_max_chg_voltage=3.6,
-            soc_curve_max_dchg_voltage=3.0,
-            soc_curve_points_num=100,
+            ocv_curve_max_chg_voltage=DEFAULT_MAX_CHARGE_VOLTAGE,
+            ocv_curve_max_dchg_voltage=DEFAULT_MAX_DISCHARGE_VOLTAGE,
+            ocv_curve_points_num=DEFAULT_OCV_SAMPLES,
+            debug=args.debug,
         )
-    )
-
-    # Sort rint_points by temperature (assumed to be first element of each sublist)
+    )    # Sort rint_points by temperature (assumed to be first element of each sublist)
     rint_points_sorted = sorted(rint_points, key=lambda x: x[0])
     r_int_vector = np.transpose(np.array(rint_points_sorted))
     r_int_curve_params = fit_R_int_curve(r_int_vector[1], r_int_vector[0])
@@ -542,8 +565,12 @@ if __name__ == "__main__":
 
     generate_battery_libraries(
         battery_model_data,
-        output_dir="exported_libraries_updated",
+        output_dir=args.output_dir,
         battery_name=battery_manufacturer,
     )
 
     save_battery_model_to_json(battery_model, json_path)
+
+if __name__ == "__main__":
+    main()
+

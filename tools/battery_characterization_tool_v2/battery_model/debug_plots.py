@@ -74,7 +74,7 @@ def identify_ocv_curve_debug_plot(time, vbat, ibat, ocv, ocv_curve_indeces,
     plot_general_config(ax[0], "Open-circuit voltage", "Time [min]", "Voltage [V]")
 
     for ix in ocv_curve_indeces:
-        ax[0].axvline(x=time_to_minutes(time[ix]), color='gray', linestyle='--', linewidth=0.5,alpha=0.3)
+        ax[0].axvline(x=time_to_minutes(time[ix],time[0]), color='gray', linestyle='--', linewidth=0.5,alpha=0.3)
         ax[0].legend()
 
     ax[1].plot(time_to_minutes(time), ibat,  label="ibat")

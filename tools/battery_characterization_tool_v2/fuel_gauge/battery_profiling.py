@@ -522,7 +522,6 @@ def extract_SoC_interpolation_points(
 
     for i in range(len(intervals)):
 
-        delta = measured_capacity  # Just and ultimitly largest options
         idx = 0
         cusum = 0
         current = intervals[i] * measured_capacity
@@ -542,9 +541,9 @@ def extract_SoC_interpolation_points(
             )
             cusum += abs(cur_incr) / 3600
 
-            if abs(cusum - current) < delta:
-                delta = abs(cusum - current)
+            if cusum >= current:
                 idx = rev_i  # len(I_OC) - j - 1
+                break
 
         SoC_curve[0][i] = intervals[i]  # SoC
         try:
@@ -749,8 +748,6 @@ def extract_SoC_curve_charging(
 
         if sample < max_dischg_voltage:
             max_dischg_v_idx = i + 1
-
-    # max_dischg_v_idx = int(len(vbat_filtered)*0.95)
 
     cut_time = linear_dischg_data.time[max_dischg_v_idx:max_chg_v_idx]
     V_oc_cut = V_oc[max_dischg_v_idx:max_chg_v_idx]

@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.optimize import curve_fit
 from scipy.signal import convolve, find_peaks
-from .debug_plots import identify_r_int_debug_plot
+from .debug_plots import identify_r_int_debug_plot, identify_ocv_curve_debug_plot
 
 """
 This library provides the set of functions to extract battery model parameters from the measured data
@@ -94,8 +94,6 @@ def sample_ocv_curve(time, ocv, ibat, bat_capacity, num_of_samples, ascending=Fa
     indices = np.zeros(num_of_samples, dtype=int)
 
     for i in range(len(intervals)):
-
-        delta = bat_capacity # Just and ultimately largest options
         idx = 0
         cusum = 0
         current = intervals[i]*bat_capacity
@@ -114,9 +112,8 @@ def sample_ocv_curve(time, ocv, ibat, bat_capacity, num_of_samples, ascending=Fa
             cur_incr = (((ibat[idx-1] + ibat[idx])/2)*((time[idx]-time[idx-1])/1000))
             cusum += abs(cur_incr)/3600
 
-            if(abs(cusum - current) < delta):
-                delta = abs(cusum - current)
-                idx = idx
+            if(cusum >= current):
+                break
 
         ocv_curve[0][i] = intervals[i]
         try:
@@ -168,6 +165,9 @@ def identify_r_int(time: np.ndarray, ibat: np.ndarray, vbat: np.ndarray, temp: n
     # profile where r_int drfts away from typial value.
     r_int_cons_indices = valid_transitions[int(len(valid_transitions)/4):int(len(valid_transitions)*3/4)]
     r_int_cons = r_int[int(len(valid_transitions)/4):int(len(valid_transitions)*3/4)]
+    if len(r_int_cons) == 0:
+        return None
+
     r_int_est = sum(r_int_cons)/len(r_int_cons)
 
     if debug:
@@ -195,6 +195,7 @@ def identify_ocv_curve(time : np.ndarray, vbat : np.ndarray, ibat: np.ndarray, r
     # Translate the voltage into OCV using the internal resistance
     ocv = vbat_filtered + ((ibat_filtered/1000) * r_int)
 
+    curve_ascending = False
     if(ocv[0] < ocv[-1]):
         curve_ascending = True
 
@@ -212,13 +213,13 @@ def identify_ocv_curve(time : np.ndarray, vbat : np.ndarray, ibat: np.ndarray, r
         if curve_ascending:
             x = vbat_filtered[-(i + 1)] # Sweep backwards
             if(x < min_curve_v):
-                min_curve_v_idx = vbat_filtered[-(i)]
+                min_curve_v_idx = len(vbat_filtered) - i
                 break
 
         else:
             x = vbat_filtered[i]
             if(x < min_curve_v):
-                min_curve_v_idx = vbat_filtered[(i-1)]
+                min_curve_v_idx = i - 1
                 break
 
     # Find max_voltage index
@@ -227,13 +228,13 @@ def identify_ocv_curve(time : np.ndarray, vbat : np.ndarray, ibat: np.ndarray, r
         if curve_ascending:
             x = vbat_filtered[i]
             if(x > max_curve_v):
-                max_curve_v_idx = vbat_filtered[i-1]
+                max_curve_v_idx = i - 1
                 break
 
         else:
             x = vbat_filtered[-(i + 1)]  # Sweep backwards
             if(x > max_curve_v):
-                max_curve_v_idx = vbat_filtered[-(i)]
+                max_curve_v_idx = len(vbat_filtered) - i
                 break
 
 
@@ -241,21 +242,24 @@ def identify_ocv_curve(time : np.ndarray, vbat : np.ndarray, ibat: np.ndarray, r
     if curve_ascending:
         time_cut = time[min_curve_v_idx:max_curve_v_idx]
         ocv_cut = ocv[min_curve_v_idx:max_curve_v_idx]
+        vbat_cut = vbat_filtered[min_curve_v_idx:max_curve_v_idx]
         ibat_cut = ibat_filtered[min_curve_v_idx:max_curve_v_idx]
     else:
-        time_cut = time[max_curve_v_idx:max_curve_v_idx]
-        ocv_cut = ocv[max_curve_v_idx:max_curve_v_idx]
-        ibat_cut = ibat_filtered[max_curve_v_idx:max_curve_v_idx]
+        time_cut = time[max_curve_v_idx:min_curve_v_idx]
+        ocv_cut = ocv[max_curve_v_idx:min_curve_v_idx]
+        vbat_cut = vbat_filtered[max_curve_v_idx:min_curve_v_idx]
+        ibat_cut = ibat_filtered[max_curve_v_idx:min_curve_v_idx]
 
     # Measure current capacity over the full profileintervals
     total_capacity     = coulomb_counter(time, ibat)
     effective_capacity = coulomb_counter(time_cut, ibat_cut)
 
     # Sample ocv curve (relation between SoC and OCV)
-    ocv_curve, indices = sample_ocv_curve(time, ocv, ibat, effective_capacity, num_of_samples, ascending=curve_ascending)
+    ocv_curve, indices = sample_ocv_curve(time_cut, ocv_cut, ibat_cut, effective_capacity, num_of_samples, ascending=curve_ascending)
 
     if debug:
-        pass
+        identify_ocv_curve_debug_plot(time_cut, vbat_cut, ibat_cut,
+                                      ocv_cut, indices)
 
     return ocv_curve, total_capacity, effective_capacity
 
@@ -315,6 +319,19 @@ def rational_linear_rational(x, m, b, a1, b1, c1, a3, b3, c3):
 
 def fit_ocv_curve(ocv_curve):
 
+    """
+    Fit an OCV curve (SoC/ocv relation) using a rational-linear-rational model
+
+    Parameters:
+    - soc_curve: 2D array [SoC, OCV]
+
+    Returns:
+    - popt_rlr: Fitted parameters for rational_linear_rational function
+    - popt_rlr_complete: Fitted parameters including continuity terms d1 and d3
+    """
+
+    p0 = [1.0] * 8
+
     popt_rlr, pcov_rlr = curve_fit(rational_linear_rational, ocv_curve[0], ocv_curve[1])
 
     [m, b, a1, b1, c1, a3, b3, c3] = popt_rlr
@@ -333,17 +350,7 @@ def fit_ocv_curve(ocv_curve):
 
     popt_rlr_complete = [m, b, a1, b1, c1, d1, a3, b3, c3, d3]
 
-    return popt_rlr_complete
-
-
-
-
-
-
-
-
-
-
+    return popt_rlr, popt_rlr_complete
 
 
 
