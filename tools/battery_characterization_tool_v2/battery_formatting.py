@@ -1,14 +1,16 @@
+
 from pathlib import Path
 import numpy as np
 import tomllib
 import sys
 import argparse
+
 import matplotlib.pyplot as plt
 from collections import defaultdict
 from utils.data_filtering import filter_dataset_constants, count_entries
 from utils.data_convertor import cut_charging_phase, cut_discharging_phase
 
-from battery_model import identify_r_int, identify_ocv_curve, fit_ocv_curve
+from battery_model import identify_r_int, identify_ocv_curve, fit_ocv_curve, fit_r_int_curve
 
 from fuel_gauge.battery_profiling import (
     rational_fit,
@@ -56,7 +58,6 @@ def parse_arguments():
     )
 
     return parser.parse_args()
-
 
 def prompt_for_config_file():
 
@@ -118,7 +119,6 @@ def load_config(toml_path):
 
 
 # ==========Disctionary structure for the data===========
-
 
 # Helper to safely parse filenames
 def extract_file_info(file):
@@ -255,7 +255,9 @@ def extract_soc_and_rint_curves(
         print(f"\nProcessing temperature: {temp}°C")
         profiles = []
 
+        # Sweep all batteries in the dataset for given temperature
         for battery in sorted(filtered_dataset):
+
             print(f"Processing battery: {battery}")
             found = find_profiles_across_timestamps(battery, temp)
 
@@ -278,57 +280,67 @@ def extract_soc_and_rint_curves(
             linear_charge    = cut_charging_phase(linear_charge)
             linear_discharge = cut_discharging_phase(linear_discharge)
 
-            R_int_estim = identify_r_int(
+            # Estimate internal resistance on the switching discharge profile
+            r_int_estim = identify_r_int(
                 switching_discharge.time,
                 switching_discharge.battery_current,
                 switching_discharge.battery_voltage,
                 switching_discharge.battery_temp,
                 debug=debug,
+                test_description=f"{battery} {temp}°C discharge",
             )
 
-            R_int_estim_charge = identify_r_int(
+            """
+            Internal resistance estimated on the charging waveform gives questionable results,
+            so its not used for anything right now, we keep it here for completeness and use the
+            estimated resistance on discharge waveforms.
+            """
+            r_int_estim_charge = identify_r_int(
                 switching_charge.time,
                 switching_charge.battery_current,
                 switching_charge.battery_voltage,
                 switching_charge.battery_temp,
                 debug=debug,
+                test_description=f"{battery} {temp}°C charge",
             )
 
-
+            # Extract open-circuit voltage (OCV) curve from the linear discharge and charge profiles
             ocv_curve_discharge, total_capacity, effective_capacity = identify_ocv_curve(linear_discharge.time,
                                                                                     linear_discharge.battery_voltage,
                                                                                     linear_discharge.battery_current,
-                                                                                    R_int_estim,
+                                                                                    r_int_estim,
                                                                                     max_curve_v=ocv_curve_max_chg_voltage,
                                                                                     min_curve_v=ocv_curve_max_dchg_voltage,
                                                                                     num_of_samples=ocv_curve_points_num,
-                                                                                    debug=debug)
+                                                                                    debug=debug,
+                                                                                    test_description=f"{battery} {temp}°C discharge")
 
             ocv_curve_charge, _, effective_capacity_charge = identify_ocv_curve(linear_charge.time,
                                                                                 linear_charge.battery_voltage,
                                                                                 linear_charge.battery_current,
-                                                                                R_int_estim,
+                                                                                r_int_estim,
                                                                                 max_curve_v=ocv_curve_max_chg_voltage,
                                                                                 min_curve_v=ocv_curve_max_dchg_voltage,
                                                                                 num_of_samples=ocv_curve_points_num,
-                                                                                debug=debug)
+                                                                                debug=debug,
+                                                                                test_description=f"{battery} {temp}°C charge")
 
             mean_temp_discharge, _ = get_mean_temp(switching_discharge.battery_temp)
-            r_int_points.append([mean_temp_discharge, R_int_estim])
+            r_int_points.append([mean_temp_discharge, r_int_estim])
 
             mean_temp_charge, _ = get_mean_temp(switching_charge.battery_temp)
-            r_int_points_charge.append([mean_temp_charge, R_int_estim_charge])
+            r_int_points_charge.append([mean_temp_charge, r_int_estim_charge])
 
             entry = {
                 "data": linear_discharge,
-                "ambient_temp": temp,
+                "chamber_temp": temp,
                 "ntc_temp": mean_temp_discharge,
-                "R_int": R_int_estim,
-                "R_int_charge": R_int_estim_charge,
+                "r_int": r_int_estim,
+                "r_int_charge": r_int_estim_charge,
                 "max_chg_voltage": ocv_curve_max_chg_voltage,
                 "max_disch_voltage": ocv_curve_max_dchg_voltage,
-                "SoC_curve": ocv_curve_discharge,
-                "SoC_curve_charge": ocv_curve_charge,
+                "ocv_curve": ocv_curve_discharge,
+                "ocv_curve_charge": ocv_curve_charge,
                 "total_capacity": effective_capacity,
                 "total_capacity_charge": effective_capacity_charge,
                 "capacity_yield": total_capacity - effective_capacity,
@@ -344,10 +356,10 @@ def extract_soc_and_rint_curves(
         ocv_profiles_discharge = np.array(
             [
                 np.concatenate(
-                    [p["SoC_curve"][0] for p in profiles]
+                    [p["ocv_curve"][0] for p in profiles]
                 ),  # X values concatenated
                 np.concatenate(
-                    [p["SoC_curve"][1] for p in profiles]
+                    [p["ocv_curve"][1] for p in profiles]
                 ),  # Y values concatenated
             ]
         )
@@ -355,8 +367,8 @@ def extract_soc_and_rint_curves(
         # Prepare ocv charge profiles similarly
         ocv_profiles_charge = np.array(
             [
-                np.concatenate([p["SoC_curve_charge"][0] for p in profiles]),
-                np.concatenate([p["SoC_curve_charge"][1] for p in profiles]),
+                np.concatenate([p["ocv_curve_charge"][0] for p in profiles]),
+                np.concatenate([p["ocv_curve_charge"][1] for p in profiles]),
             ]
         )
 
@@ -386,7 +398,7 @@ def extract_soc_and_rint_curves(
             [p["total_capacity_charge"] for p in profiles]
         )
         # capacity_yield_arr = np.array([p["capacity_yield"] for p in profiles])
-        R_int_arr = np.array([p["R_int"] for p in profiles])
+        r_int_arr = np.array([p["r_int"] for p in profiles])
 
         total_capacity_mean = np.mean(total_capacity_arr)
         total_capacity_std = np.std(total_capacity_arr)
@@ -397,8 +409,8 @@ def extract_soc_and_rint_curves(
         # capacity_yield_mean = np.mean(capacity_yield_arr)
         # capacity_yield_std = np.std(capacity_yield_arr)
 
-        R_int_mean = np.mean(R_int_arr)
-        R_int_std = np.std(R_int_arr)
+        r_int_mean = np.mean(r_int_arr)
+        r_int_std = np.std(r_int_arr)
 
         # Store results in dictionaries indexed by rounded ntc temp mean
         ocv_curves[round(ntc_temp_mean, 2)] = {
@@ -410,8 +422,8 @@ def extract_soc_and_rint_curves(
             "total_capacity_discharge_std": total_capacity_std,
             "total_capacity_charge_mean": total_capacity_charge_mean,
             "total_capacity_charge_std": total_capacity_charge_std,
-            "r_int_mean": R_int_mean,
-            "r_int_std": R_int_std,
+            "r_int_mean": r_int_mean,
+            "r_int_std": r_int_std,
             "ntc_temp_mean": ntc_temp_mean,
             "ntc_temp_std": ntc_temp_std,
         }
@@ -507,7 +519,7 @@ def main():
     )    # Sort rint_points by temperature (assumed to be first element of each sublist)
     rint_points_sorted = sorted(rint_points, key=lambda x: x[0])
     r_int_vector = np.transpose(np.array(rint_points_sorted))
-    r_int_curve_params = fit_R_int_curve(r_int_vector[1], r_int_vector[0])
+    r_int_curve_params, _ = fit_r_int_curve(r_int_vector[1], r_int_vector[0], args.debug)
     """
     # Same for charge
     rint_points_charge_sorted = sorted(rint_points_charge, key=lambda x: x[0])
@@ -570,6 +582,10 @@ def main():
     )
 
     save_battery_model_to_json(battery_model, json_path)
+
+    if args.debug:
+        # Show the plots if in debug mode
+        plt.show()
 
 if __name__ == "__main__":
     main()

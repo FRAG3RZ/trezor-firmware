@@ -126,7 +126,7 @@ def sample_ocv_curve(time, ocv, ibat, bat_capacity, num_of_samples, ascending=Fa
     return ocv_curve, indices
 
 
-def identify_r_int(time: np.ndarray, ibat: np.ndarray, vbat: np.ndarray, temp: np.ndarray, debug=False):
+def identify_r_int(time: np.ndarray, ibat: np.ndarray, vbat: np.ndarray, temp: np.ndarray, debug=False, test_description = None):
     """
     Identify internal resistance of the battery from the measured voltage and current data.
 
@@ -174,13 +174,14 @@ def identify_r_int(time: np.ndarray, ibat: np.ndarray, vbat: np.ndarray, temp: n
         identify_r_int_debug_plot(time, vbat_filtered, ibat_filtered,
                                   valid_transitions, m1_idx, m2_idx,
                                   r_int, r_int_cons_indices, r_int_cons,
-                                  r_int_est)
+                                  r_int_est,
+                                  name=test_description)
     return r_int_est
 
 
 def identify_ocv_curve(time : np.ndarray, vbat : np.ndarray, ibat: np.ndarray, r_int: float,
                        max_curve_v: float, min_curve_v: float,
-                       num_of_samples: int = 100, debug=False):
+                       num_of_samples: int = 100, debug=False, test_description = None):
     """
     Extract the SOC curve as relation between battery open-circuit voltage and state of charge from
     the measured data of constant load discharge profile.
@@ -259,7 +260,7 @@ def identify_ocv_curve(time : np.ndarray, vbat : np.ndarray, ibat: np.ndarray, r
 
     if debug:
         identify_ocv_curve_debug_plot(time_cut, vbat_cut, ibat_cut,
-                                      ocv_cut, indices)
+                                      ocv_cut, indices, name=test_description)
 
     return ocv_curve, total_capacity, effective_capacity
 
