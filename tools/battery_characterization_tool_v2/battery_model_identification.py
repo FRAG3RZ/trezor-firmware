@@ -1,4 +1,3 @@
-
 from pathlib import Path
 import numpy as np
 import tomllib
@@ -11,7 +10,14 @@ from dataset.data_filtering import filter_dataset_constants, count_entries
 from dataset.battery_profile import cut_charging_phase, cut_discharging_phase
 from dataset.battery_dataset import BatteryDataset
 
-from battery_model import identify_r_int, identify_ocv_curve, fit_ocv_curve, fit_r_int_curve
+from battery_model import (
+    identify_r_int,
+    identify_ocv_curve,
+    fit_ocv_curve,
+    fit_r_int_curve,
+    estimate_r_int,
+    estimate_ocv_curve,
+)
 from generate_battery_libraries_v2 import generate_battery_libraries
 from dataset.battery_profile import load_battery_profile
 from fuel_gauge.profile_data_utils import get_mean_temp
@@ -23,38 +29,38 @@ from fuel_gauge.battery_model import (
 
 from archive.battery_profiling import rational_fit
 
-DEFAULT_MAX_CHARGE_VOLTAGE    = 3.9
+DEFAULT_MAX_CHARGE_VOLTAGE = 3.9
 DEFAULT_MAX_DISCHARGE_VOLTAGE = 3.0
-DEFAULT_OCV_SAMPLES           = 100
+DEFAULT_OCV_SAMPLES = 100
+
 
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         description="Battery characterization tool for processing battery test data",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     parser.add_argument(
         "config_file",
         nargs="?",
         default=None,
-        help="Path to TOML configuration file (without .toml extension)"
+        help="Path to TOML configuration file (without .toml extension)",
     )
 
     parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable debug output and plots"
+        "--debug", action="store_true", help="Enable debug output and plots"
     )
 
     parser.add_argument(
         "--output-dir",
         type=str,
         default="exported_data",
-        help="Output directory for generated data"
+        help="Output directory for generated data",
     )
 
     return parser.parse_args()
+
 
 def prompt_for_config_file():
 
@@ -115,123 +121,233 @@ def load_config(toml_path):
     )
 
 
-# ==========Dataset loading using the new BatteryDataset class===========
+def create_battery_dataset(dataset_path) -> BatteryDataset:
 
-def build_library_dataset(dataset_path):
-    """
-    Build the library dataset using the new BatteryDataset class.
-
-    Args:
-        dataset_path: Path to CSV files (can be directory or glob pattern)
-
-    Returns:
-        BatteryDataset instance with loaded data
-    """
     battery_dataset = BatteryDataset(dataset_path, load_data=True)
 
     print(f"Dataset loaded: {battery_dataset}")
-    battery_dataset.print_structure(max_depth=5)
 
-    # Convert to the old format for compatibility with existing code
-    # This allows gradual migration to the new class
-    library = defaultdict(
-        lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-    )
+    battery_dataset.print_structure(max_depth=3)
 
-    for battery_id in battery_dataset.get_battery_ids():
-        for temperature in battery_dataset.get_temperatures(battery_id):
-            for battery_mode in battery_dataset.get_battery_modes(battery_id, temperature):
-                for mode_phase in battery_dataset.get_mode_phases(battery_id, temperature, battery_mode):
-                    for timestamp_id in battery_dataset.get_timestamp_ids(battery_id, temperature, battery_mode, mode_phase):
-                        data = battery_dataset.get_data(battery_id, temperature, battery_mode, mode_phase, timestamp_id)
-                        if data is not None:
-                            # Convert back to old hierarchy: battery -> timestamp -> mode -> phase -> temperature
-                            library[battery_id][timestamp_id][battery_mode][mode_phase][temperature] = data
+    return battery_dataset
 
-    return library
 
-# ========Graphing functions========
+def run_r_int_identification(dataset, debug=False):
+    """Takes all switching discharge profiles from the dataset and for every profile estimates the internal
+    resistance. All estimations are then fitted with a rational function and its parametrs are returned.
+    """
+
+    r_int_points = []
+
+    # Get all switching discharge profiles across all batteries and temperatures
+    for ld_profile in dataset.get_data_list(
+        battery_ids=None,
+        temperatures=None,
+        battery_modes=["switching"],
+        mode_phases=["discharging"],
+    ):
+
+        print(
+            f"Processing profile: {ld_profile['battery_id']}.{ld_profile['timestamp_id']}.{ld_profile['battery_mode']}.{ld_profile['mode_phase']}.{ld_profile['temperature']}"
+        )
+
+        profile_data = ld_profile["data"]
+
+        # Estimate internal resistance on the switching discharge profile
+        r_int_estim = identify_r_int(
+            profile_data.time,
+            profile_data.battery_current,
+            profile_data.battery_voltage,
+            profile_data.battery_temp,
+            debug=debug,
+            test_description=f"{ld_profile['battery_id']} {ld_profile['timestamp_id']} {ld_profile['temperature']}°C discharge",
+        )
+
+        # extract mean temperature from the analyzed profile
+        mean_temp, _ = get_mean_temp(profile_data.battery_temp)
+
+        r_int_points.append([mean_temp, r_int_estim])
+
+    # r_int_points_sorted = sorted(r_int_points, key=lambda x: x[0])
+    r_int_vector = np.transpose(np.array(r_int_points))
+    r_int_rf_params, _ = fit_r_int_curve(r_int_vector[1], r_int_vector[0], debug)
+
+    return r_int_rf_params
+
+
+def run_ocv_identification(dataset, r_int_rf_params, charging=False, debug=False):
+    """Takes all linear discharge profiles from the dataset and for every profile extracts the open-circuit voltage"""
+    ocv_ident_data = {}
+
+    # Get all linear discharge/charge profiles from the dataset across all batteries and temperatures
+    for ld_profile in dataset.get_data_list(
+        battery_ids=None,
+        temperatures=None,
+        battery_modes=["linear"],
+        mode_phases=["discharging"] if not charging else ["charging"],
+    ):
+
+        print(
+            f"Processing profile: {ld_profile['battery_id']}.{ld_profile['timestamp_id']}.{ld_profile['battery_mode']}.{ld_profile['mode_phase']}.{ld_profile['temperature']}"
+        )
+
+        # Some of the dataset contain tails from relaxation phase, cut them off`
+        if charging:
+            profile_data = cut_charging_phase(ld_profile["data"])
+        else:
+            profile_data = cut_discharging_phase(ld_profile["data"])
+
+        # extract internal resistance from the r_int curve
+        real_bat_temp, _ = get_mean_temp(profile_data.battery_temp)
+        r_int = estimate_r_int(real_bat_temp, r_int_rf_params)
+
+        # Extract open-circuit voltage (OCV) curve from the linear discharge and charge profiles
+        ocv_curve_discharge, total_capacity, effective_capacity = identify_ocv_curve(
+            profile_data.time,
+            profile_data.battery_voltage,
+            profile_data.battery_current,
+            r_int,
+            max_curve_v=DEFAULT_MAX_CHARGE_VOLTAGE,
+            min_curve_v=DEFAULT_MAX_DISCHARGE_VOLTAGE,
+            num_of_samples=DEFAULT_OCV_SAMPLES,
+            debug=debug,
+            test_description=f"{ld_profile['battery_id']} {ld_profile['timestamp_id']} {ld_profile['temperature']}°C discharge",
+        )
+
+        temp_key = ld_profile["temperature"]
+        ocv_ident_data.setdefault(
+            temp_key,
+            {
+                "ocv_curve_points": [],
+                "total_capacity": [],
+                "effective_capacity": [],
+                "real_bat_temp": [],
+            },
+        )
+
+        ocv_ident_data[temp_key]["ocv_curve_points"].append(ocv_curve_discharge)
+        ocv_ident_data[temp_key]["total_capacity"].append(total_capacity)
+        ocv_ident_data[temp_key]["effective_capacity"].append(effective_capacity)
+        ocv_ident_data[temp_key]["real_bat_temp"].append(real_bat_temp)
+
+    return ocv_ident_data
 
 
 def extract_soc_and_rint_curves(
     dataset,
     filter_batteries,
     characterized_temperatures_deg,
-    ocv_curve_max_chg_voltage,
-    ocv_curve_max_dchg_voltage,
-    ocv_curve_points_num,
     debug=False,
 ):
 
-    def hash_leaf_file_names(d):
-        leaf_keys = []
+    # def hash_leaf_file_names(d):
+    #     leaf_keys = []
 
-        def collect_leaves(node):
-            if isinstance(node, dict):
-                for key, value in node.items():
-                    if isinstance(value, dict) and value:
-                        collect_leaves(value)
-                    elif not isinstance(value, dict):
-                        pass  # skip — we only want keys (file names)
-                    else:
-                        leaf_keys.append(key)  # file name as dict key
+    #     def collect_leaves(node):
+    #         if isinstance(node, dict):
+    #             for key, value in node.items():
+    #                 if isinstance(value, dict) and value:
+    #                     collect_leaves(value)
+    #                 elif not isinstance(value, dict):
+    #                     pass  # skip — we only want keys (file names)
+    #                 else:
+    #                     leaf_keys.append(key)  # file name as dict key
 
-        collect_leaves(d)
+    #     collect_leaves(d)
 
-        # Sort keys for deterministic hash
-        leaf_keys_sorted = sorted(leaf_keys)
-        joined_keys = "\n".join(leaf_keys_sorted)
+    #     # Sort keys for deterministic hash
+    #     leaf_keys_sorted = sorted(leaf_keys)
+    #     joined_keys = "\n".join(leaf_keys_sorted)
 
-        return hashlib.sha256(joined_keys.encode("utf-8")).hexdigest()
+    #     return hashlib.sha256(joined_keys.encode("utf-8")).hexdigest()
 
-    # Filter dataset to relevant components
-    filtered_dataset = filter_dataset_constants(
-        dataset,
-        filtered_batteries=filter_batteries,
-        filtered_modes=["switching", "linear"],
-        filtered_phases=["charging", "discharging"],
-        filtered_temps=characterized_temperatures_deg,
+    # # Filter dataset to relevant components
+    # filtered_dataset = filter_dataset_constants(
+    #     dataset,
+    #     filtered_batteries=filter_batteries,
+    #     filtered_modes=["switching", "linear"],
+    #     filtered_phases=["charging", "discharging"],
+    #     filtered_temps=characterized_temperatures_deg,
+    # )
+
+    filtered_dataset = dataset.filter(
+        battery_ids=filter_batteries,
+        temperatures=characterized_temperatures_deg,
+        battery_modes=["switching", "linear"],
     )
 
-    print(
-        f"SUCCESS: Dataset contains {count_entries(filtered_dataset)} entries after filtering."
-    )
-    file_name_hash = hash_leaf_file_names(filtered_dataset)
-    print(f"File names hash: {file_name_hash}")
+    r_int_rf_params = run_r_int_identification(filtered_dataset, debug=debug)
 
+    ocv_data_discharge = run_ocv_identification(
+        filtered_dataset,
+        r_int_rf_params,
+        charging=False,
+        debug=debug,
+    )
+
+    ocv_data_charge = run_ocv_identification(
+        filtered_dataset,
+        r_int_rf_params,
+        charging=True,
+        debug=debug,
+    )
+
+    """
+    All ocv data for charge and discharge profiles are ready, fit the ocv
+    curves and assign them with real battery temperatures, then store them
+    in ocv_curves dict.
+    """
     ocv_curves = {}
-    r_int_points = []
-    r_int_points_charge = []
 
-    def find_profiles_across_timestamps(battery, temp):
-        temp_key = str(temp)
-        found = {
-            "switching_discharge": None,
-            "switching_charge": None,
-            "linear_discharge": None,
-            "linear_charge": None,
+    for temp in characterized_temperatures_deg:
+
+        ocv_profiles_discharge = np.array(
+            [
+                np.concatenate(
+                    [d[0] for d in ocv_data_discharge[temp]["ocv_curve_points"]]
+                ),  # X values concatenated
+                np.concatenate(
+                    [d[1] for d in ocv_data_discharge[temp]["ocv_curve_points"]]
+                ),  # Y values concatenated
+            ]
+        )
+
+        dsg_ocv_params, dsg_ocv_params_complete = fit_ocv_curve(ocv_profiles_discharge)
+        dsg_temp = np.mean(ocv_data_discharge[temp]["real_bat_temp"])
+        dsg_ef_cap = np.mean(ocv_data_discharge[temp]["effective_capacity"])
+        dsg_total_cap = np.mean(ocv_data_discharge[temp]["total_capacity"])
+
+        ocv_profiles_charge = np.array(
+            [
+                np.concatenate(
+                    [d[0] for d in ocv_data_charge[temp]["ocv_curve_points"]]
+                ),  # X values concatenated
+                np.concatenate(
+                    [d[1] for d in ocv_data_charge[temp]["ocv_curve_points"]]
+                ),  # Y values concatenated
+            ]
+        )
+
+        chg_ocv_params, chg_ocv_params_complete = fit_ocv_curve(ocv_profiles_charge)
+        chg_temp = np.mean(ocv_data_charge[temp]["real_bat_temp"])
+        chg_ef_cap = np.mean(ocv_data_charge[temp]["effective_capacity"])
+        chg_total_cap = np.mean(ocv_data_charge[temp]["total_capacity"])
+
+        ocv_curves[round(temp, 2)] = {
+            "ocv_dischg": dsg_ocv_params_complete,
+            "ocv_dischg_nc": dsg_ocv_params,
+            "bat_temp_dischg": dsg_temp,
+            "total_capacity_dischg": dsg_total_cap,
+            "effective_capacity_dischg": dsg_ef_cap,
+            "ocv_chg": chg_ocv_params_complete,
+            "ocv_chg_nc": chg_ocv_params,
+            "bat_temp_chg": chg_temp,
+            "total_capacity_chg": chg_total_cap,
+            "effective_capacity_chg": chg_ef_cap,
         }
-        for timestamp in sorted(filtered_dataset[battery]):
 
-            node = filtered_dataset[battery][timestamp]
-
-            found["switching_discharge"] = found["switching_discharge"] or node.get(
-                "switching", {}
-            ).get("discharging", {}).get(temp_key)
-            found["switching_charge"] = found["switching_charge"] or node.get(
-                "switching", {}
-            ).get("charging", {}).get(temp_key)
-            found["linear_discharge"] = found["linear_discharge"] or node.get(
-                "linear", {}
-            ).get("discharging", {}).get(temp_key)
-            found["linear_charge"] = found["linear_charge"] or node.get(
-                "linear", {}
-            ).get("charging", {}).get(temp_key)
-
-            if all(found.values()):
-                break
-
-        return found
+    plt.show()
+    sys.exit(0)
 
     for temp in characterized_temperatures_deg:
 
@@ -239,97 +355,110 @@ def extract_soc_and_rint_curves(
         profiles = []
 
         # Sweep all batteries in the dataset for given temperature
-        for battery in sorted(filtered_dataset):
+        filtered_temp = filtered_dataset.filter(temperatures=[temp])
 
-            print(f"Processing battery: {battery}")
-            found = find_profiles_across_timestamps(battery, temp)
+        for battery in filtered_temp.get_battery_ids():
 
-            if not all(found.values()):
-                print(f"WARNING: Missing profiles for battery {battery}, temp {temp}:")
-                for k, v in found.items():
-                    if v is None:
-                        print(f"  - Missing {k.replace('_', ' ')}")
-                continue
+            # Identify switching profiles to identify internal resistance
+            for i in range(1, 4):
+                try:
+                    switching_discharge = filtered_temp.get_data(
+                        battery, temp, "switching", "discharging", timestamp
+                    )
+                    switching_charge = filtered_temp.get_data(
+                        battery, temp, "switching", "charging", timestamp
+                    )
+                    linear_discharge = filtered_temp.get_data(
+                        battery, temp, "linear", "discharging", timestamp
+                    )
+                    linear_charge = filtered_temp.get_data(
+                        battery, temp, "linear", "charging", timestamp
+                    )
+                except:
+                    print(
+                        f"Error, some of the profiles are missing for battery {battery}, temp {temp}, timestamp {timestamp}"
+                    )
+                    continue
 
-            # All profiles are now safe to use
-            switching_discharge = found["switching_discharge"]
-            switching_charge = found["switching_charge"]
-            linear_discharge = found["linear_discharge"]
-            linear_charge = found["linear_charge"]
+                # Make sure the profile do not have any tails from relaxation phase
+                switching_discharge = cut_discharging_phase(switching_discharge)
+                switching_charge = cut_charging_phase(switching_charge)
+                linear_charge = cut_charging_phase(linear_charge)
+                linear_discharge = cut_discharging_phase(linear_discharge)
 
-            # Make sure the profile do not have any tails from relaxation phase
-            switching_discharge = cut_discharging_phase(switching_discharge)
-            switching_charge = cut_charging_phase(switching_charge)
-            linear_charge    = cut_charging_phase(linear_charge)
-            linear_discharge = cut_discharging_phase(linear_discharge)
+                # Estimate internal resistance on the switching discharge profile
+                r_int_estim = identify_r_int(
+                    switching_discharge.time,
+                    switching_discharge.battery_current,
+                    switching_discharge.battery_voltage,
+                    switching_discharge.battery_temp,
+                    debug=debug,
+                    test_description=f"{battery} {temp}°C discharge",
+                )
 
-            # Estimate internal resistance on the switching discharge profile
-            r_int_estim = identify_r_int(
-                switching_discharge.time,
-                switching_discharge.battery_current,
-                switching_discharge.battery_voltage,
-                switching_discharge.battery_temp,
-                debug=debug,
-                test_description=f"{battery} {temp}°C discharge",
-            )
+                """
+                Internal resistance estimated on the charging waveform gives questionable results,
+                so its not used for anything right now, we keep it here for completeness and use the
+                estimated resistance on discharge waveforms.
+                """
+                r_int_estim_charge = identify_r_int(
+                    switching_charge.time,
+                    switching_charge.battery_current,
+                    switching_charge.battery_voltage,
+                    switching_charge.battery_temp,
+                    debug=debug,
+                    test_description=f"{battery} {temp}°C charge",
+                )
 
-            """
-            Internal resistance estimated on the charging waveform gives questionable results,
-            so its not used for anything right now, we keep it here for completeness and use the
-            estimated resistance on discharge waveforms.
-            """
-            r_int_estim_charge = identify_r_int(
-                switching_charge.time,
-                switching_charge.battery_current,
-                switching_charge.battery_voltage,
-                switching_charge.battery_temp,
-                debug=debug,
-                test_description=f"{battery} {temp}°C charge",
-            )
+                # Extract open-circuit voltage (OCV) curve from the linear discharge and charge profiles
+                ocv_curve_discharge, total_capacity, effective_capacity = (
+                    identify_ocv_curve(
+                        linear_discharge.time,
+                        linear_discharge.battery_voltage,
+                        linear_discharge.battery_current,
+                        r_int_estim,
+                        max_curve_v=DEFAULT_MAX_CHARGE_VOLTAGE,
+                        min_curve_v=DEFAULT_MAX_DISCHARGE_VOLTAGE,
+                        num_of_samples=DEFAULT_OCV_SAMPLES,
+                        debug=debug,
+                        test_description=f"{battery} {temp}°C discharge",
+                    )
+                )
 
-            # Extract open-circuit voltage (OCV) curve from the linear discharge and charge profiles
-            ocv_curve_discharge, total_capacity, effective_capacity = identify_ocv_curve(linear_discharge.time,
-                                                                                    linear_discharge.battery_voltage,
-                                                                                    linear_discharge.battery_current,
-                                                                                    r_int_estim,
-                                                                                    max_curve_v=ocv_curve_max_chg_voltage,
-                                                                                    min_curve_v=ocv_curve_max_dchg_voltage,
-                                                                                    num_of_samples=ocv_curve_points_num,
-                                                                                    debug=debug,
-                                                                                    test_description=f"{battery} {temp}°C discharge")
+                ocv_curve_charge, _, effective_capacity_charge = identify_ocv_curve(
+                    linear_charge.time,
+                    linear_charge.battery_voltage,
+                    linear_charge.battery_current,
+                    r_int_estim,
+                    max_curve_v=DEFAULT_MAX_CHARGE_VOLTAGE,
+                    min_curve_v=DEFAULT_MAX_DISCHARGE_VOLTAGE,
+                    num_of_samples=DEFAULT_OCV_SAMPLES,
+                    debug=debug,
+                    test_description=f"{battery} {temp}°C charge",
+                )
 
-            ocv_curve_charge, _, effective_capacity_charge = identify_ocv_curve(linear_charge.time,
-                                                                                linear_charge.battery_voltage,
-                                                                                linear_charge.battery_current,
-                                                                                r_int_estim,
-                                                                                max_curve_v=ocv_curve_max_chg_voltage,
-                                                                                min_curve_v=ocv_curve_max_dchg_voltage,
-                                                                                num_of_samples=ocv_curve_points_num,
-                                                                                debug=debug,
-                                                                                test_description=f"{battery} {temp}°C charge")
+                mean_temp_discharge, _ = get_mean_temp(switching_discharge.battery_temp)
+                r_int_points.append([mean_temp_discharge, r_int_estim])
 
-            mean_temp_discharge, _ = get_mean_temp(switching_discharge.battery_temp)
-            r_int_points.append([mean_temp_discharge, r_int_estim])
+                mean_temp_charge, _ = get_mean_temp(switching_charge.battery_temp)
+                r_int_points_charge.append([mean_temp_charge, r_int_estim_charge])
 
-            mean_temp_charge, _ = get_mean_temp(switching_charge.battery_temp)
-            r_int_points_charge.append([mean_temp_charge, r_int_estim_charge])
+                entry = {
+                    "data": linear_discharge,
+                    "chamber_temp": temp,
+                    "ntc_temp": mean_temp_discharge,
+                    "r_int": r_int_estim,
+                    "r_int_charge": r_int_estim_charge,
+                    "max_chg_voltage": DEFAULT_MAX_CHARGE_VOLTAGE,
+                    "max_disch_voltage": DEFAULT_MAX_DISCHARGE_VOLTAGE,
+                    "ocv_curve": ocv_curve_discharge,
+                    "ocv_curve_charge": ocv_curve_charge,
+                    "total_capacity": effective_capacity,
+                    "total_capacity_charge": effective_capacity_charge,
+                    "capacity_yield": total_capacity - effective_capacity,
+                }
 
-            entry = {
-                "data": linear_discharge,
-                "chamber_temp": temp,
-                "ntc_temp": mean_temp_discharge,
-                "r_int": r_int_estim,
-                "r_int_charge": r_int_estim_charge,
-                "max_chg_voltage": ocv_curve_max_chg_voltage,
-                "max_disch_voltage": ocv_curve_max_dchg_voltage,
-                "ocv_curve": ocv_curve_discharge,
-                "ocv_curve_charge": ocv_curve_charge,
-                "total_capacity": effective_capacity,
-                "total_capacity_charge": effective_capacity_charge,
-                "capacity_yield": total_capacity - effective_capacity,
-            }
-
-            profiles.append(entry)
+                profiles.append(entry)
 
         if not profiles:
             print(f"ERROR: No usable profiles at {temp}°C")
@@ -357,7 +486,9 @@ def extract_soc_and_rint_curves(
 
         # Fit ocv curves on the concatenated data (discharge and charge)
         curve_params, curve_params_complete = fit_ocv_curve(ocv_profiles_discharge)
-        curve_params_charge, curve_params_charge_complete = fit_ocv_curve(ocv_profiles_charge)
+        curve_params_charge, curve_params_charge_complete = fit_ocv_curve(
+            ocv_profiles_charge
+        )
 
         """
         # Extract arrays of all ocv curve Y-values (discharge and charge) for averaging & std
@@ -454,6 +585,7 @@ def extract_soc_and_rint_curves(
 
     return ocv_curves, r_int_points, r_int_points_charge, file_name_hash
 
+
 def main():
     # Parse command line arguments
     args = parse_arguments()
@@ -487,22 +619,21 @@ def main():
     print(f"  Output directory: {args.output_dir}")
     print(f"  Debug mode: {args.debug}")
 
-    dataset = build_library_dataset(dataset_path)
+    dataset = create_battery_dataset(dataset_path)
 
     ocv_curves, rint_points, rint_points_charge, file_name_hash = (
         extract_soc_and_rint_curves(
             dataset,
             filter_batteries=batteries_to_process,
             characterized_temperatures_deg=temperatures_to_process,
-            ocv_curve_max_chg_voltage=DEFAULT_MAX_CHARGE_VOLTAGE,
-            ocv_curve_max_dchg_voltage=DEFAULT_MAX_DISCHARGE_VOLTAGE,
-            ocv_curve_points_num=DEFAULT_OCV_SAMPLES,
             debug=args.debug,
         )
-    )    # Sort rint_points by temperature (assumed to be first element of each sublist)
+    )  # Sort rint_points by temperature (assumed to be first element of each sublist)
     rint_points_sorted = sorted(rint_points, key=lambda x: x[0])
     r_int_vector = np.transpose(np.array(rint_points_sorted))
-    r_int_curve_params, _ = fit_r_int_curve(r_int_vector[1], r_int_vector[0], args.debug)
+    r_int_curve_params, _ = fit_r_int_curve(
+        r_int_vector[1], r_int_vector[0], args.debug
+    )
     """
     # Same for charge
     rint_points_charge_sorted = sorted(rint_points_charge, key=lambda x: x[0])
@@ -570,6 +701,6 @@ def main():
         # Show the plots if in debug mode
         plt.show()
 
+
 if __name__ == "__main__":
     main()
-

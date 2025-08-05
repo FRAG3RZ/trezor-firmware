@@ -272,9 +272,36 @@ def fit_r_int_curve(r_int_arr, temp_arr, debug=False):
     Fit the internal resistance curve with rational funtion.
     returns fitted parameters
     """
-
     poptr, pcovr = curve_fit(rational_f, temp_arr, r_int_arr)
+
+    if debug:
+        # Plot the fitted curve
+        plt.figure()
+        plt.scatter(temp_arr, r_int_arr, label='estimated r_int data points', color='blue')
+        x_fit = np.linspace(min(temp_arr), max(temp_arr), 100)
+        y_fit = rational_f(x_fit, *poptr)
+        plt.plot(x_fit, y_fit, label='fitted r_int curve', color='red')
+        plt.xlabel('Temperature [°C]')
+        plt.ylabel('Internal resistance [Ohm]')
+        plt.title('Fitted Internal Resistance Curve')
+        plt.legend()
+        plt.grid()
+
     return poptr, pcovr
+
+def estimate_r_int(temp, r_int_params):
+    """
+    Estimate the internal resistance for given temperature using fitted parameters.
+    """
+    a, b, c, d = r_int_params
+    return rational_f(temp, a, b, c, d)
+
+def estimate_ocv_curve(x, ocv_params):
+    """
+    Estimate the OCV for given SoC using fitted parameters.
+    """
+    m, b, a1, b1, c1, a3, b3, c3 = ocv_params
+    return rational_linear_rational(x, m, b, a1, b1, c1, a3, b3, c3)
 
 def rational_linear_rational(x, m, b, a1, b1, c1, a3, b3, c3):
     """

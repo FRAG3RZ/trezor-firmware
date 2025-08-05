@@ -172,6 +172,30 @@ class BatteryDataset:
             return []
         return sorted(list(self._data[battery_id][temperature][battery_mode][mode_phase].keys()))
 
+    def get_all_timestamps_for_battery_temp(self, battery_id: str, temperature: str) -> List[str]:
+        """
+        Get all available timestamps for a given battery_id and temperature
+        across all modes and phases.
+
+        Args:
+            battery_id: The battery identifier
+            temperature: The temperature value (as string)
+
+        Returns:
+            Sorted list of unique timestamp IDs found across all modes and phases
+        """
+        if battery_id not in self._data or temperature not in self._data[battery_id]:
+            return []
+
+        all_timestamps = set()
+
+        for battery_mode in self._data[battery_id][temperature]:
+            for mode_phase in self._data[battery_id][temperature][battery_mode]:
+                timestamps = self._data[battery_id][temperature][battery_mode][mode_phase].keys()
+                all_timestamps.update(timestamps)
+
+        return sorted(list(all_timestamps))
+
     def get_data(self, battery_id: str, temperature: str, battery_mode: str, mode_phase: str, timestamp_id: str):
         """
         Get data for specific battery profile.
@@ -184,7 +208,7 @@ class BatteryDataset:
 
             # If lazy loading (data is still a file path), load it now
             if isinstance(data, Path):
-                loaded_data = load_measured_data_new(data)
+                loaded_data = load_battery_profile(data)
                 # Cache the loaded data
                 self._data[battery_id][temperature][battery_mode][mode_phase][timestamp_id] = loaded_data
                 return loaded_data
@@ -268,6 +292,180 @@ class BatteryDataset:
                             filtered_dataset._stats['loaded_files'] += 1
 
         return filtered_dataset
+
+    def get_data_list(self,
+                      battery_ids: Optional[List[str]] = None,
+                      temperatures: Optional[List[str]] = None,
+                      battery_modes: Optional[List[str]] = None,
+                      mode_phases: Optional[List[str]] = None,
+                      timestamp_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """
+        Get a list of data entries that match the filtering criteria.
+
+        Args:
+            battery_ids: List of battery IDs to include (None = all)
+            temperatures: List of temperatures to include (None = all)
+            battery_modes: List of battery modes to include (None = all)
+            mode_phases: List of mode phases to include (None = all)
+            timestamp_ids: List of timestamp IDs to include (None = all)
+
+        Returns:
+            List of dictionaries, each containing:
+            - 'battery_id': str
+            - 'temperature': str
+            - 'battery_mode': str
+            - 'mode_phase': str
+            - 'timestamp_id': str
+            - 'data': loaded data object
+            - 'file_info': file metadata dict
+        """
+        result_list = []
+
+        # Apply filters and collect data
+        for battery_id in self._data:
+            if battery_ids and battery_id not in battery_ids:
+                continue
+
+            for temperature in self._data[battery_id]:
+                if temperatures and temperature not in temperatures:
+                    continue
+
+                for battery_mode in self._data[battery_id][temperature]:
+                    if battery_modes and battery_mode not in battery_modes:
+                        continue
+
+                    for mode_phase in self._data[battery_id][temperature][battery_mode]:
+                        if mode_phases and mode_phase not in mode_phases:
+                            continue
+
+                        for timestamp_id in self._data[battery_id][temperature][battery_mode][mode_phase]:
+                            if timestamp_ids and timestamp_id not in timestamp_ids:
+                                continue
+
+                            # Get data and file info
+                            data = self.get_data(battery_id, temperature, battery_mode, mode_phase, timestamp_id)
+                            file_info = self.get_file_info(battery_id, temperature, battery_mode, mode_phase, timestamp_id)
+
+                            result_list.append({
+                                'battery_id': battery_id,
+                                'temperature': temperature,
+                                'battery_mode': battery_mode,
+                                'mode_phase': mode_phase,
+                                'timestamp_id': timestamp_id,
+                                'data': data,
+                                'file_info': file_info
+                            })
+
+        return result_list
+
+    def get_data_only(self,
+                      battery_ids: Optional[List[str]] = None,
+                      temperatures: Optional[List[str]] = None,
+                      battery_modes: Optional[List[str]] = None,
+                      mode_phases: Optional[List[str]] = None,
+                      timestamp_ids: Optional[List[str]] = None) -> List[Any]:
+        """
+        Get only the data objects (without metadata) that match the filtering criteria.
+
+        Args:
+            battery_ids: List of battery IDs to include (None = all)
+            temperatures: List of temperatures to include (None = all)
+            battery_modes: List of battery modes to include (None = all)
+            mode_phases: List of mode phases to include (None = all)
+            timestamp_ids: List of timestamp IDs to include (None = all)
+
+        Returns:
+            List of data objects only
+        """
+        data_list = []
+
+        # Apply filters and collect only data
+        for battery_id in self._data:
+            if battery_ids and battery_id not in battery_ids:
+                continue
+
+            for temperature in self._data[battery_id]:
+                if temperatures and temperature not in temperatures:
+                    continue
+
+                for battery_mode in self._data[battery_id][temperature]:
+                    if battery_modes and battery_mode not in battery_modes:
+                        continue
+
+                    for mode_phase in self._data[battery_id][temperature][battery_mode]:
+                        if mode_phases and mode_phase not in mode_phases:
+                            continue
+
+                        for timestamp_id in self._data[battery_id][temperature][battery_mode][mode_phase]:
+                            if timestamp_ids and timestamp_id not in timestamp_ids:
+                                continue
+
+                            # Get only the data
+                            data = self.get_data(battery_id, temperature, battery_mode, mode_phase, timestamp_id)
+                            if data is not None:
+                                data_list.append(data)
+
+        return data_list
+
+    def get_data_for_battery_temp(self, battery_id: str, temperature: str) -> List[Dict[str, Any]]:
+        """
+        Convenience method to get all data for a specific battery and temperature.
+
+        Args:
+            battery_id: The battery identifier
+            temperature: The temperature value (as string)
+
+        Returns:
+            List of data entries for the specified battery and temperature
+        """
+        return self.get_data_list(battery_ids=[battery_id], temperatures=[temperature])
+
+    def get_data_for_mode_phase(self, battery_mode: str, mode_phase: str) -> List[Dict[str, Any]]:
+        """
+        Convenience method to get all data for a specific mode and phase across all batteries and temperatures.
+
+        Args:
+            battery_mode: The battery mode (e.g., 'linear', 'switching')
+            mode_phase: The mode phase (e.g., 'charging', 'discharging')
+
+        Returns:
+            List of data entries for the specified mode and phase
+        """
+        return self.get_data_list(battery_modes=[battery_mode], mode_phases=[mode_phase])
+
+    def get_charging_data(self, battery_ids: Optional[List[str]] = None, temperatures: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """
+        Convenience method to get all charging data.
+
+        Args:
+            battery_ids: Optional list of battery IDs to filter by
+            temperatures: Optional list of temperatures to filter by
+
+        Returns:
+            List of charging data entries
+        """
+        return self.get_data_list(
+            battery_ids=battery_ids,
+            temperatures=temperatures,
+            mode_phases=['charging']
+        )
+
+    def get_discharging_data(self, battery_ids: Optional[List[str]] = None, temperatures: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """
+        Convenience method to get all discharging data.
+
+        Args:
+            battery_ids: Optional list of battery IDs to filter by
+            temperatures: Optional list of temperatures to filter by
+
+        Returns:
+            List of discharging data entries
+        """
+        return self.get_data_list(
+            battery_ids=battery_ids,
+            temperatures=temperatures,
+            mode_phases=['discharging']
+        )
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get dataset statistics."""

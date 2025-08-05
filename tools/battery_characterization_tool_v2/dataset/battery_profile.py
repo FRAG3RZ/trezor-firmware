@@ -164,7 +164,7 @@ def cut_charging_phase(data):
 
     # Find all indices where current is negative (charging)
     # np.where returns a tuple, we want the first (and only) array of indices
-    where_result = np.where(data.ibat < 0)
+    where_result = np.where(data.battery_current < 0)
     all_charge_indices = where_result[0]
 
     if len(all_charge_indices) == 0:
@@ -217,7 +217,7 @@ def cut_discharging_phase(data):
     """
 
     # Find all indices where current is positive (discharging)
-    where_result = np.where(data.ibat > 0)
+    where_result = np.where(data.battery_current > 0)
     all_discharge_indices = where_result[0]
 
     if len(all_discharge_indices) == 0:
