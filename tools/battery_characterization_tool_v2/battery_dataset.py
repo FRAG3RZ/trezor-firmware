@@ -2,7 +2,7 @@
 Battery Dataset Manager
 
 A class to organize and manage battery profile CSV files with hierarchical structure:
-battery_id -> temperature -> battery_mode -> mode_phase -> timestamp_id -> data
+battery_id -> timestamp_id -> battery_mode -> mode_phase -> temperature -> data
 
 File naming convention: <battery_id>.<timestamp_id>.<battery_mode>.<mode_phase>.<temperature>.csv
 """
@@ -11,13 +11,14 @@ from pathlib import Path
 from collections import defaultdict
 import numpy as np
 from typing import Dict, List, Optional, Union, Any
-from .battery_profile import load_battery_profile
+from utils.data_convertor import load_measured_data_new
+
 
 class BatteryDataset:
     """
     A class to manage battery profile datasets with hierarchical organization.
 
-    Structure: battery_id -> temperature -> battery_mode -> mode_phase -> timestamp_id -> data
+    Structure: battery_id -> timestamp_id -> battery_mode -> mode_phase -> temperature -> data
     """
 
     def __init__(self, dataset_path: Union[str, Path], load_data: bool = True):
@@ -31,7 +32,7 @@ class BatteryDataset:
         self.dataset_path = Path(dataset_path)
         self.load_data = load_data
 
-        # Create nested defaultdict structure: battery -> temperature -> mode -> phase -> timestamp -> data
+        # Create nested defaultdict structure: battery -> timestamp -> mode -> phase -> temp -> data
         self._data = defaultdict(
             lambda: defaultdict(
                 lambda: defaultdict(
@@ -121,20 +122,20 @@ class BatteryDataset:
                 continue
 
             # Store file metadata
-            self._file_metadata[battery_id][temperature][battery_mode][mode_phase][timestamp_id] = file_info
+            self._file_metadata[battery_id][timestamp_id][battery_mode][mode_phase][temperature] = file_info
 
             # Load data if requested
             if self.load_data:
                 try:
-                    data = load_battery_profile(file_path)
-                    self._data[battery_id][temperature][battery_mode][mode_phase][timestamp_id] = data
+                    data = load_measured_data_new(file_path)
+                    self._data[battery_id][timestamp_id][battery_mode][mode_phase][temperature] = data
                     self._stats['loaded_files'] += 1
                 except Exception as e:
                     print(f"ERROR loading {file_path.name}: {e}")
                     self._stats['error_files'] += 1
             else:
                 # Store file path for lazy loading
-                self._data[battery_id][temperature][battery_mode][mode_phase][timestamp_id] = file_path
+                self._data[battery_id][timestamp_id][battery_mode][mode_phase][temperature] = file_path
                 self._stats['loaded_files'] += 1
 
         print(f"Dataset loaded: {self._stats}")
@@ -143,36 +144,36 @@ class BatteryDataset:
         """Get list of all battery IDs in the dataset."""
         return sorted(list(self._data.keys()))
 
-    def get_temperatures(self, battery_id: str) -> List[str]:
-        """Get list of all temperatures for a given battery."""
+    def get_timestamp_ids(self, battery_id: str) -> List[str]:
+        """Get list of all timestamp IDs for a given battery."""
         if battery_id not in self._data:
             return []
         return sorted(list(self._data[battery_id].keys()))
 
-    def get_battery_modes(self, battery_id: str, temperature: str) -> List[str]:
-        """Get list of all battery modes for a given battery and temperature."""
-        if battery_id not in self._data or temperature not in self._data[battery_id]:
+    def get_battery_modes(self, battery_id: str, timestamp_id: str) -> List[str]:
+        """Get list of all battery modes for a given battery and timestamp."""
+        if battery_id not in self._data or timestamp_id not in self._data[battery_id]:
             return []
-        return sorted(list(self._data[battery_id][temperature].keys()))
+        return sorted(list(self._data[battery_id][timestamp_id].keys()))
 
-    def get_mode_phases(self, battery_id: str, temperature: str, battery_mode: str) -> List[str]:
-        """Get list of all mode phases for a given battery, temperature, and mode."""
+    def get_mode_phases(self, battery_id: str, timestamp_id: str, battery_mode: str) -> List[str]:
+        """Get list of all mode phases for a given battery, timestamp, and mode."""
         if (battery_id not in self._data or
-            temperature not in self._data[battery_id] or
-            battery_mode not in self._data[battery_id][temperature]):
+            timestamp_id not in self._data[battery_id] or
+            battery_mode not in self._data[battery_id][timestamp_id]):
             return []
-        return sorted(list(self._data[battery_id][temperature][battery_mode].keys()))
+        return sorted(list(self._data[battery_id][timestamp_id][battery_mode].keys()))
 
-    def get_timestamp_ids(self, battery_id: str, temperature: str, battery_mode: str, mode_phase: str) -> List[str]:
-        """Get list of all timestamp IDs for a given battery, temperature, mode, and phase."""
+    def get_temperatures(self, battery_id: str, timestamp_id: str, battery_mode: str, mode_phase: str) -> List[str]:
+        """Get list of all temperatures for a given battery, timestamp, mode, and phase."""
         if (battery_id not in self._data or
-            temperature not in self._data[battery_id] or
-            battery_mode not in self._data[battery_id][temperature] or
-            mode_phase not in self._data[battery_id][temperature][battery_mode]):
+            timestamp_id not in self._data[battery_id] or
+            battery_mode not in self._data[battery_id][timestamp_id] or
+            mode_phase not in self._data[battery_id][timestamp_id][battery_mode]):
             return []
-        return sorted(list(self._data[battery_id][temperature][battery_mode][mode_phase].keys()))
+        return sorted(list(self._data[battery_id][timestamp_id][battery_mode][mode_phase].keys()))
 
-    def get_data(self, battery_id: str, temperature: str, battery_mode: str, mode_phase: str, timestamp_id: str):
+    def get_data(self, battery_id: str, timestamp_id: str, battery_mode: str, mode_phase: str, temperature: str):
         """
         Get data for specific battery profile.
 
@@ -180,41 +181,41 @@ class BatteryDataset:
             Loaded data array or None if not found
         """
         try:
-            data = self._data[battery_id][temperature][battery_mode][mode_phase][timestamp_id]
+            data = self._data[battery_id][timestamp_id][battery_mode][mode_phase][temperature]
 
             # If lazy loading (data is still a file path), load it now
             if isinstance(data, Path):
                 loaded_data = load_measured_data_new(data)
                 # Cache the loaded data
-                self._data[battery_id][temperature][battery_mode][mode_phase][timestamp_id] = loaded_data
+                self._data[battery_id][timestamp_id][battery_mode][mode_phase][temperature] = loaded_data
                 return loaded_data
 
             return data
         except KeyError:
             return None
 
-    def get_file_info(self, battery_id: str, temperature: str, battery_mode: str, mode_phase: str, timestamp_id: str) -> Optional[Dict]:
+    def get_file_info(self, battery_id: str, timestamp_id: str, battery_mode: str, mode_phase: str, temperature: str) -> Optional[Dict]:
         """Get file metadata for specific battery profile."""
         try:
-            return self._file_metadata[battery_id][temperature][battery_mode][mode_phase][timestamp_id]
+            return self._file_metadata[battery_id][timestamp_id][battery_mode][mode_phase][temperature]
         except KeyError:
             return None
 
     def filter(self,
                battery_ids: Optional[List[str]] = None,
-               temperatures: Optional[List[str]] = None,
+               timestamp_ids: Optional[List[str]] = None,
                battery_modes: Optional[List[str]] = None,
                mode_phases: Optional[List[str]] = None,
-               timestamp_ids: Optional[List[str]] = None) -> 'BatteryDataset':
+               temperatures: Optional[List[str]] = None) -> 'BatteryDataset':
         """
         Create a filtered copy of the dataset.
 
         Args:
             battery_ids: List of battery IDs to include (None = all)
-            temperatures: List of temperatures to include (None = all)
+            timestamp_ids: List of timestamp IDs to include (None = all)
             battery_modes: List of battery modes to include (None = all)
             mode_phases: List of mode phases to include (None = all)
-            timestamp_ids: List of timestamp IDs to include (None = all)
+            temperatures: List of temperatures to include (None = all)
 
         Returns:
             New BatteryDataset instance with filtered data
@@ -244,27 +245,27 @@ class BatteryDataset:
             if battery_ids and battery_id not in battery_ids:
                 continue
 
-            for temperature in self._data[battery_id]:
-                if temperatures and temperature not in temperatures:
+            for timestamp_id in self._data[battery_id]:
+                if timestamp_ids and timestamp_id not in timestamp_ids:
                     continue
 
-                for battery_mode in self._data[battery_id][temperature]:
+                for battery_mode in self._data[battery_id][timestamp_id]:
                     if battery_modes and battery_mode not in battery_modes:
                         continue
 
-                    for mode_phase in self._data[battery_id][temperature][battery_mode]:
+                    for mode_phase in self._data[battery_id][timestamp_id][battery_mode]:
                         if mode_phases and mode_phase not in mode_phases:
                             continue
 
-                        for timestamp_id in self._data[battery_id][temperature][battery_mode][mode_phase]:
-                            if timestamp_ids and timestamp_id not in timestamp_ids:
+                        for temperature in self._data[battery_id][timestamp_id][battery_mode][mode_phase]:
+                            if temperatures and temperature not in temperatures:
                                 continue
 
                             # Copy data and metadata
-                            filtered_dataset._data[battery_id][temperature][battery_mode][mode_phase][timestamp_id] = \
-                                self._data[battery_id][temperature][battery_mode][mode_phase][timestamp_id]
-                            filtered_dataset._file_metadata[battery_id][temperature][battery_mode][mode_phase][timestamp_id] = \
-                                self._file_metadata[battery_id][temperature][battery_mode][mode_phase][timestamp_id]
+                            filtered_dataset._data[battery_id][timestamp_id][battery_mode][mode_phase][temperature] = \
+                                self._data[battery_id][timestamp_id][battery_mode][mode_phase][temperature]
+                            filtered_dataset._file_metadata[battery_id][timestamp_id][battery_mode][mode_phase][temperature] = \
+                                self._file_metadata[battery_id][timestamp_id][battery_mode][mode_phase][temperature]
                             filtered_dataset._stats['loaded_files'] += 1
 
         return filtered_dataset
@@ -275,11 +276,11 @@ class BatteryDataset:
         stats.update({
             'unique_battery_ids': len(self.get_battery_ids()),
             'total_profiles': sum(
-                len(self.get_timestamp_ids(bid, temp, bm, mp))
+                len(self.get_temperatures(bid, tid, bm, mp))
                 for bid in self.get_battery_ids()
-                for temp in self.get_temperatures(bid)
-                for bm in self.get_battery_modes(bid, temp)
-                for mp in self.get_mode_phases(bid, temp, bm)
+                for tid in self.get_timestamp_ids(bid)
+                for bm in self.get_battery_modes(bid, tid)
+                for mp in self.get_mode_phases(bid, tid, bm)
             )
         })
         return stats
@@ -290,27 +291,27 @@ class BatteryDataset:
         print(f"├── Battery IDs: {self.get_battery_ids()}")
 
         for battery_id in self.get_battery_ids()[:2]:  # Show first 2 batteries as example
-            temperatures = self.get_temperatures(battery_id)
+            timestamp_ids = self.get_timestamp_ids(battery_id)
             print(f"│   ├── {battery_id}/")
-            print(f"│   │   ├── Temperatures: {temperatures}")
+            print(f"│   │   ├── Timestamps: {timestamp_ids}")
 
             if max_depth > 2:
-                for temperature in temperatures[:1]:  # Show first temperature as example
-                    battery_modes = self.get_battery_modes(battery_id, temperature)
-                    print(f"│   │   │   ├── {temperature}°C/")
+                for timestamp_id in timestamp_ids[:1]:  # Show first timestamp as example
+                    battery_modes = self.get_battery_modes(battery_id, timestamp_id)
+                    print(f"│   │   │   ├── {timestamp_id}/")
                     print(f"│   │   │   │   ├── Modes: {battery_modes}")
 
                     if max_depth > 3:
                         for battery_mode in battery_modes:
-                            mode_phases = self.get_mode_phases(battery_id, temperature, battery_mode)
+                            mode_phases = self.get_mode_phases(battery_id, timestamp_id, battery_mode)
                             print(f"│   │   │   │   │   ├── {battery_mode}/")
                             print(f"│   │   │   │   │   │   ├── Phases: {mode_phases}")
 
                             if max_depth > 4:
                                 for mode_phase in mode_phases:
-                                    timestamp_ids = self.get_timestamp_ids(battery_id, temperature, battery_mode, mode_phase)
+                                    temperatures = self.get_temperatures(battery_id, timestamp_id, battery_mode, mode_phase)
                                     print(f"│   │   │   │   │   │   │   ├── {mode_phase}/")
-                                    print(f"│   │   │   │   │   │   │   │   └── Timestamps: {timestamp_ids}")
+                                    print(f"│   │   │   │   │   │   │   │   └── Temps: {temperatures}")
 
         if len(self.get_battery_ids()) > 2:
             print(f"│   └── ... and {len(self.get_battery_ids()) - 2} more batteries")
@@ -330,7 +331,7 @@ class BatteryDataset:
 # Example usage and testing
 if __name__ == "__main__":
     # Example usage
-    dataset_path = Path("datasets/ts7_battery_data_JYHPFL333838")
+    dataset_path = Path("dataset") / "*.csv"  # or just Path("dataset") for directory
 
     # Load dataset
     battery_dataset = BatteryDataset(dataset_path)
@@ -346,11 +347,11 @@ if __name__ == "__main__":
     battery_ids = battery_dataset.get_battery_ids()
     if battery_ids:
         first_battery = battery_ids[0]
-        temperatures = battery_dataset.get_temperatures(first_battery)
-        if temperatures:
-            first_temperature = temperatures[0]
-            modes = battery_dataset.get_battery_modes(first_battery, first_temperature)
-            print(f"\nModes for {first_battery} at {first_temperature}°C: {modes}")
+        timestamps = battery_dataset.get_timestamp_ids(first_battery)
+        if timestamps:
+            first_timestamp = timestamps[0]
+            modes = battery_dataset.get_battery_modes(first_battery, first_timestamp)
+            print(f"\nModes for {first_battery} at {first_timestamp}: {modes}")
 
     # Filter example
     filtered = battery_dataset.filter(

@@ -1,4 +1,4 @@
-dataset_path = "dataset/ts7_battery_data_JYHPFL333838"
+dataset_path = "dataset/datasets/ts7_battery_data_JYHPFL333838"
 json_path = "exported_libraries_updated/battery_models_jsons"
 battery_manufacturer = "JYHPFL333838"
 batteries_to_process = [] #empty means all batteries are proccesed

@@ -827,7 +827,7 @@ if __name__ == "__main__":
     # If this script is run directly, try to import the battery model data
     try:
         # Import battery_model_data from main script if available
-        from run_battery_characterization import battery_model_data
+        from archive.run_battery_characterization import battery_model_data
         generate_battery_libraries(battery_model_data, args.output_dir, args.battery_name)
     except (ImportError, AttributeError):
         print("No battery_model_data found. Please run this script after battery characterization.")

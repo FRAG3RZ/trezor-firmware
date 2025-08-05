@@ -707,7 +707,7 @@ def export_battery_model_lookup(battery_model_data, output_dir="."):
 
 if __name__ == "__main__":
     # Example usage
-    from run_battery_characterization import main as run_characterization
+    from archive.run_battery_characterization import main as run_characterization
 
     # If this script is run directly, try to import the battery model data
     # from a parent script that has already run the characterization

@@ -7,24 +7,21 @@ import argparse
 
 import matplotlib.pyplot as plt
 from collections import defaultdict
-from utils.data_filtering import filter_dataset_constants, count_entries
-from utils.data_convertor import cut_charging_phase, cut_discharging_phase
+from dataset.data_filtering import filter_dataset_constants, count_entries
+from dataset.battery_profile import cut_charging_phase, cut_discharging_phase
+from dataset.battery_dataset import BatteryDataset
 
 from battery_model import identify_r_int, identify_ocv_curve, fit_ocv_curve, fit_r_int_curve
-
-from fuel_gauge.battery_profiling import (
-    rational_fit,
-    fit_soc_curve,
-    fit_R_int_curve,
-)
 from generate_battery_libraries_v2 import generate_battery_libraries
-from utils.data_convertor import load_measured_data_new
+from dataset.battery_profile import load_battery_profile
 from fuel_gauge.profile_data_utils import get_mean_temp
 from fuel_gauge.battery_model import (
     BatteryModel,
     hashlib,
     save_battery_model_to_json,
 )
+
+from archive.battery_profiling import rational_fit
 
 DEFAULT_MAX_CHARGE_VOLTAGE    = 3.9
 DEFAULT_MAX_DISCHARGE_VOLTAGE = 3.0
@@ -103,7 +100,7 @@ def load_config(toml_path):
         sys.exit(1)
 
     # Match exact variable names from config
-    dataset_path = Path(config["dataset_path"]).glob("*.csv")
+    dataset_path = Path(config["dataset_path"])
     json_path = Path(config["json_path"])
     battery_manufacturer = config["battery_manufacturer"]
     batteries_to_process = config["batteries_to_process"]
@@ -118,54 +115,39 @@ def load_config(toml_path):
     )
 
 
-# ==========Disctionary structure for the data===========
+# ==========Dataset loading using the new BatteryDataset class===========
 
-# Helper to safely parse filenames
-def extract_file_info(file):
-    parts = file.stem.split(".")
-    if len(parts) < 5:
-        return None
-    return {
-        "battery": parts[0],
-        "timestamp": parts[1],
-        "mode": parts[2],
-        "phase": parts[3],
-        "temp": parts[4],
-        "path": file,
-    }
-
-
-# Build the library dataset in the format [battery][time][mode][phase][temp]
 def build_library_dataset(dataset_path):
-    # Use recursive defaultdicts to build a 5-level nested dict
+    """
+    Build the library dataset using the new BatteryDataset class.
+
+    Args:
+        dataset_path: Path to CSV files (can be directory or glob pattern)
+
+    Returns:
+        BatteryDataset instance with loaded data
+    """
+    battery_dataset = BatteryDataset(dataset_path, load_data=True)
+
+    print(f"Dataset loaded: {battery_dataset}")
+    battery_dataset.print_structure(max_depth=5)
+
+    # Convert to the old format for compatibility with existing code
+    # This allows gradual migration to the new class
     library = defaultdict(
         lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
     )
 
-    for file in dataset_path:
-        info = extract_file_info(file)
-        if info is None:
-            continue
+    for battery_id in battery_dataset.get_battery_ids():
+        for temperature in battery_dataset.get_temperatures(battery_id):
+            for battery_mode in battery_dataset.get_battery_modes(battery_id, temperature):
+                for mode_phase in battery_dataset.get_mode_phases(battery_id, temperature, battery_mode):
+                    for timestamp_id in battery_dataset.get_timestamp_ids(battery_id, temperature, battery_mode, mode_phase):
+                        data = battery_dataset.get_data(battery_id, temperature, battery_mode, mode_phase, timestamp_id)
+                        if data is not None:
+                            # Convert back to old hierarchy: battery -> timestamp -> mode -> phase -> temperature
+                            library[battery_id][timestamp_id][battery_mode][mode_phase][temperature] = data
 
-        # Extract metadata
-        battery = info["battery"]
-        timestamp = info["timestamp"]
-        mode = info["mode"]
-        phase = info["phase"]
-        temp = info["temp"]
-
-        # Skip if the phase is 'done'
-        if phase == "done":
-            print(f"SKIPPING: {file.name} file — with phase 'done'")
-            continue
-
-        try:
-            data = load_measured_data_new(info["path"])
-            library[battery][timestamp][mode][phase][temp] = data
-        except Exception as e:
-            print(f"WARNING: Failed to load {file.name}: {e}")
-
-    print(f"Dataset built with {len(library)} batteries.")
     return library
 
 # ========Graphing functions========
@@ -230,6 +212,7 @@ def extract_soc_and_rint_curves(
             "linear_charge": None,
         }
         for timestamp in sorted(filtered_dataset[battery]):
+
             node = filtered_dataset[battery][timestamp]
 
             found["switching_discharge"] = found["switching_discharge"] or node.get(
@@ -498,7 +481,7 @@ def main():
     ) = load_config(config_file_path)
 
     print("SUCCESS: Configuration Loaded:")
-    print(f"  Dataset path: {config_file_path}")
+    print(f"  Dataset path: {dataset_path}")
     print(f"  Manufacturer: {battery_manufacturer}")
     print(f"  Temperatures: {temperatures_to_process}")
     print(f"  Output directory: {args.output_dir}")

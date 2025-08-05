@@ -4,7 +4,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-
 @dataclass
 class BatteryAnalysisData:
     time: np.ndarray
@@ -39,10 +38,21 @@ class BatteryAnalysisData:
             f"'{type(self).__name__}' object has no attribute '{name}'"
         )
 
-
-def load_measured_data_new(
+def load_battery_profile(
     data_file_paths: Union[Path, List[Path]], extern_temp_file_path: Path = None
 ) -> BatteryAnalysisData:
+    """
+    Load battery profile data from one or more CSV files and return as a BatteryAnalysisData object.
+    if multiple files are provided, they are concatenated into a single dataset
+
+    Args:
+        data_file_paths: Path(s) to the CSV file(s) containing battery profile data.
+        extern_temp_file_path: Optional path to an external temperature CSV file.
+
+    Returns:
+        BatteryAnalysisData: An object containing the loaded battery profile data.
+    """
+
     if isinstance(data_file_paths, Path):
         data_file_paths = [data_file_paths]
 
@@ -75,7 +85,7 @@ def load_measured_data_new(
         t = profile_data["time"].to_numpy()
 
         if len(t) < 2:
-            print(f"⚠️ Skipping {file_path.name} — not enough time data (len={len(t)})")
+            print(f"SKIPPING: {file_path.name} — not enough time data (len={len(t)})")
             continue  # skip this file
 
         # Normalize and apply offset to maintain continuous time
