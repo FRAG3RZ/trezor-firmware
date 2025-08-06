@@ -185,7 +185,6 @@ def run_r_int_identification(dataset, debug=False):
 
     return r_int_rf_params
 
-
 def run_ocv_identification(dataset, r_int_rf_params, charging=False, debug=False):
     """Takes all linear discharge profiles from the dataset and for every profile extracts the open-circuit voltage"""
     console = ConsoleFormatter()
@@ -326,7 +325,7 @@ def extract_soc_and_rint_curves(
         chg_ef_cap = np.mean(ocv_data_charge[temp]["effective_capacity"])
         chg_total_cap = np.mean(ocv_data_charge[temp]["total_capacity"])
 
-        ocv_curves[float(temp)] = {
+        ocv_curves[temp] = {
             "ocv_dischg": dsg_ocv_params_complete,
             "ocv_dischg_nc": dsg_ocv_params,
             "bat_temp_dischg": dsg_temp,
@@ -363,250 +362,7 @@ def extract_soc_and_rint_curves(
 
         plt.tight_layout()
 
-    plt.show()
-
     return ocv_curves, r_int_rf_params
-
-
-    plt.show()
-    sys.exit(0)
-
-    for temp in characterized_temperatures_deg:
-
-        print(f"\nProcessing temperature: {temp}°C")
-        profiles = []
-
-        # Sweep all batteries in the dataset for given temperature
-        filtered_temp = filtered_dataset.filter(temperatures=[temp])
-
-        for battery in filtered_temp.get_battery_ids():
-
-            # Identify switching profiles to identify internal resistance
-            for i in range(1, 4):
-                try:
-                    switching_discharge = filtered_temp.get_data(
-                        battery, temp, "switching", "discharging", timestamp
-                    )
-                    switching_charge = filtered_temp.get_data(
-                        battery, temp, "switching", "charging", timestamp
-                    )
-                    linear_discharge = filtered_temp.get_data(
-                        battery, temp, "linear", "discharging", timestamp
-                    )
-                    linear_charge = filtered_temp.get_data(
-                        battery, temp, "linear", "charging", timestamp
-                    )
-                except:
-                    print(
-                        f"Error, some of the profiles are missing for battery {battery}, temp {temp}, timestamp {timestamp}"
-                    )
-                    continue
-
-                # Make sure the profile do not have any tails from relaxation phase
-                switching_discharge = cut_discharging_phase(switching_discharge)
-                switching_charge = cut_charging_phase(switching_charge)
-                linear_charge = cut_charging_phase(linear_charge)
-                linear_discharge = cut_discharging_phase(linear_discharge)
-
-                # Estimate internal resistance on the switching discharge profile
-                r_int_estim = identify_r_int(
-                    switching_discharge.time,
-                    switching_discharge.battery_current,
-                    switching_discharge.battery_voltage,
-                    switching_discharge.battery_temp,
-                    debug=debug,
-                    test_description=f"{battery} {temp}°C discharge",
-                )
-
-                """
-                Internal resistance estimated on the charging waveform gives questionable results,
-                so its not used for anything right now, we keep it here for completeness and use the
-                estimated resistance on discharge waveforms.
-                """
-                r_int_estim_charge = identify_r_int(
-                    switching_charge.time,
-                    switching_charge.battery_current,
-                    switching_charge.battery_voltage,
-                    switching_charge.battery_temp,
-                    debug=debug,
-                    test_description=f"{battery} {temp}°C charge",
-                )
-
-                # Extract open-circuit voltage (OCV) curve from the linear discharge and charge profiles
-                ocv_curve_discharge, total_capacity, effective_capacity = (
-                    identify_ocv_curve(
-                        linear_discharge.time,
-                        linear_discharge.battery_voltage,
-                        linear_discharge.battery_current,
-                        r_int_estim,
-                        max_curve_v=DEFAULT_MAX_CHARGE_VOLTAGE,
-                        min_curve_v=DEFAULT_MAX_DISCHARGE_VOLTAGE,
-                        num_of_samples=DEFAULT_OCV_SAMPLES,
-                        debug=debug,
-                        test_description=f"{battery} {temp}°C discharge",
-                    )
-                )
-
-                ocv_curve_charge, _, effective_capacity_charge = identify_ocv_curve(
-                    linear_charge.time,
-                    linear_charge.battery_voltage,
-                    linear_charge.battery_current,
-                    r_int_estim,
-                    max_curve_v=DEFAULT_MAX_CHARGE_VOLTAGE,
-                    min_curve_v=DEFAULT_MAX_DISCHARGE_VOLTAGE,
-                    num_of_samples=DEFAULT_OCV_SAMPLES,
-                    debug=debug,
-                    test_description=f"{battery} {temp}°C charge",
-                )
-
-                mean_temp_discharge, _ = get_mean_temp(switching_discharge.battery_temp)
-                r_int_points.append([mean_temp_discharge, r_int_estim])
-
-                mean_temp_charge, _ = get_mean_temp(switching_charge.battery_temp)
-                r_int_points_charge.append([mean_temp_charge, r_int_estim_charge])
-
-                entry = {
-                    "data": linear_discharge,
-                    "chamber_temp": temp,
-                    "ntc_temp": mean_temp_discharge,
-                    "r_int": r_int_estim,
-                    "r_int_charge": r_int_estim_charge,
-                    "max_chg_voltage": DEFAULT_MAX_CHARGE_VOLTAGE,
-                    "max_disch_voltage": DEFAULT_MAX_DISCHARGE_VOLTAGE,
-                    "ocv_curve": ocv_curve_discharge,
-                    "ocv_curve_charge": ocv_curve_charge,
-                    "total_capacity": effective_capacity,
-                    "total_capacity_charge": effective_capacity_charge,
-                    "capacity_yield": total_capacity - effective_capacity,
-                }
-
-                profiles.append(entry)
-
-        if not profiles:
-            print(f"ERROR: No usable profiles at {temp}°C")
-            continue
-
-        # Prepare ocv discharge profiles for concatenation and fitting
-        ocv_profiles_discharge = np.array(
-            [
-                np.concatenate(
-                    [p["ocv_curve"][0] for p in profiles]
-                ),  # X values concatenated
-                np.concatenate(
-                    [p["ocv_curve"][1] for p in profiles]
-                ),  # Y values concatenated
-            ]
-        )
-
-        # Prepare ocv charge profiles similarly
-        ocv_profiles_charge = np.array(
-            [
-                np.concatenate([p["ocv_curve_charge"][0] for p in profiles]),
-                np.concatenate([p["ocv_curve_charge"][1] for p in profiles]),
-            ]
-        )
-
-        # Fit ocv curves on the concatenated data (discharge and charge)
-        curve_params, curve_params_complete = fit_ocv_curve(ocv_profiles_discharge)
-        curve_params_charge, curve_params_charge_complete = fit_ocv_curve(
-            ocv_profiles_charge
-        )
-
-        """
-        # Extract arrays of all ocv curve Y-values (discharge and charge) for averaging & std
-        #ocv_discharge_y = np.array([p["SoC_curve"][1] for p in profiles])
-        #ocv_charge_y = np.array([p["SoC_curve_charge"][1] for p in profiles])
-        # Average and std deviation of ocv discharge curve (pointwise)
-        #ocv_mean_y = np.mean(ocv_discharge_y, axis=0)
-        #ocv_std_y = np.std(ocv_discharge_y, axis=0)
-        ocv_mean = np.array(
-            [profiles[0]["SoC_curve"][0], ocv_mean_y]
-        )  # Assuming all x same
-        """
-        # Mean and std dev for NTC temperature
-        ntc_temps = np.array([p["ntc_temp"] for p in profiles])
-        ntc_temp_mean = np.mean(ntc_temps)
-        ntc_temp_std = np.std(ntc_temps)
-
-        # Aggregate capacity and resistance stats with std dev
-        total_capacity_arr = np.array([p["total_capacity"] for p in profiles])
-        total_capacity_charge_arr = np.array(
-            [p["total_capacity_charge"] for p in profiles]
-        )
-        # capacity_yield_arr = np.array([p["capacity_yield"] for p in profiles])
-        r_int_arr = np.array([p["r_int"] for p in profiles])
-
-        total_capacity_mean = np.mean(total_capacity_arr)
-        total_capacity_std = np.std(total_capacity_arr)
-
-        total_capacity_charge_mean = np.mean(total_capacity_charge_arr)
-        total_capacity_charge_std = np.std(total_capacity_charge_arr)
-
-        # capacity_yield_mean = np.mean(capacity_yield_arr)
-        # capacity_yield_std = np.std(capacity_yield_arr)
-
-        r_int_mean = np.mean(r_int_arr)
-        r_int_std = np.std(r_int_arr)
-
-        # Store results in dictionaries indexed by rounded ntc temp mean
-        ocv_curves[round(ntc_temp_mean, 2)] = {
-            "ocv_discharge": curve_params_complete,
-            "ocv_charge": curve_params_charge_complete,
-            "ocv_discharge_nc": curve_params,
-            "ocv_charge_nc": curve_params_charge,
-            "total_capacity_discharge_mean": total_capacity_mean,
-            "total_capacity_discharge_std": total_capacity_std,
-            "total_capacity_charge_mean": total_capacity_charge_mean,
-            "total_capacity_charge_std": total_capacity_charge_std,
-            "r_int_mean": r_int_mean,
-            "r_int_std": r_int_std,
-            "ntc_temp_mean": ntc_temp_mean,
-            "ntc_temp_std": ntc_temp_std,
-        }
-
-    # ========Testing and printing functions========
-    if debug:
-
-        def fmt_float(val, precision=4):
-            if isinstance(val, (int, float)):
-                return f"{val:.{precision}f}"
-            return str(val)
-
-        print("=== OCV Curves ===")
-        for temp, data in ocv_curves.items():
-            print(f"Temperature: {temp}°C")
-            print(f"  - OCV Discharge curve params: {data['ocv_discharge']}")
-            print(f"  - OCV Charge curve params: {data['ocv_charge']}")
-            print(
-                f"  - Total Capacity Discharge: mean={fmt_float(data.get('total_capacity_discharge_mean'))}, + std={fmt_float(data.get('total_capacity_discharge_std'))}"
-            )
-            print(
-                f"  - Total Capacity Charge: mean={fmt_float(data.get('total_capacity_charge_mean'))}, std={fmt_float(data.get('total_capacity_charge_std'))}"
-            )
-            print(
-                f"  - R_int: mean={fmt_float(data.get('r_int_mean'), 6)}, std={fmt_float(data.get('r_int_std'), 6)}"
-            )
-            print(
-                f"  - NTC Temp: mean={fmt_float(data.get('ntc_temp_mean'), 2)}, std={fmt_float(data.get('ntc_temp_std'), 2)}"
-            )
-            print()
-
-        print("=== R_int Discharge ===")
-        if isinstance(r_int_points, list):
-            print(f"R_int points count: {len(r_int_points)}")
-        else:
-            print(r_int_points)
-        print()
-
-        print("=== R_int Charge ===")
-        if isinstance(r_int_points_charge, list):
-            print(f"R_int_charge points count: {len(r_int_points_charge)}")
-        else:
-            print(r_int_points_charge)
-        print()
-
-    return ocv_curves, r_int_points, r_int_points_charge, file_name_hash
-
 
 def main():
 
@@ -680,53 +436,32 @@ def main():
 
     console.success("Battery model identification completed")
 
-    # Show completion summary
-    console.footer()
+    console.section("RESULTS SUMMARY")
 
+    # Create a sample results table
+    headers = ["Temperature", "Discharge capacity", "Charge capacity", "R_int"]
 
-    # Sorting only for plotting lines (to avoid zigzag)
-    sorted_discharge = sorted(zip(r_int_vector[0], r_int_vector[1]))
-    x_d, y_d = zip(*sorted_discharge)
-    """
-    sorted_charge = sorted(zip(r_int_vector_charge[0], r_int_vector_charge[1]))
-    x_c, y_c = zip(*sorted_charge)
-    """
-    # Compute fitted values on sorted x for smooth curves
-    fit_y_d = rational_fit(np.array(x_d), *r_int_curve_params)
-    # fit_y_c = rational_fit(np.array(x_c), *r_int_curve_params_charge)
+    rows = []
+    for temp, data in sorted(ocv_curves.items(), key=lambda x: x[0]):
+        rows.append([
+            f"{temp}°C",
+            f"{data['total_capacity_dischg']*1000:.2f} mAh",
+            f"{data['total_capacity_chg']*1000:.2f} mAh",
+            f"{estimate_r_int(float(temp), r_int_rf_params)*1000:.2f} mΩ"
+        ])
 
-    # Auto Y scaling considering all data and fits
-    # all_rints = np.concatenate([y_d, y_c, fit_y_d, fit_y_c])
-    ymin = np.min(y_d)
-    ymax = np.max(fit_y_d)
-    yrange = ymax - ymin
-    margin = 0.1 * yrange if yrange > 0 else 0.01
+    console.table(headers, rows, title="Battery Model Analysis Results")
 
-    # Plot
-    ax.set_title(f"Rint curve params {r_int_curve_params}", wrap=True)
-    ax.set_xlabel(r"Temperature [$^\circ$C]", fontsize=6)
-    ax.set_ylabel(r"Internal Resistance $R_{int}$ [$\Omega$]", fontsize=6)
-
-    ax.plot(x_d, y_d, marker="+", linestyle="", label="Rint estimation (discharge)")
-    # ax.plot(x_c, y_c, marker='+', linestyle='', label="Rint estimation (charge)")
-    ax.plot(x_d, fit_y_d, label="Rint curve fit (discharge)")
-    # ax.plot(x_c, fit_y_c, label="Rint curve fit (charge)")
-
-    ax.legend()
-    ax.tick_params(axis="both", which="major", labelsize=6)
-    ax.set_xlim(xmin=0, xmax=50)
-    ax.set_ylim(ymin - margin, ymax + margin)
-
-    print(f"Rint curve params {r_int_curve_params}")
+    console.success("Analysis results table generated")
 
     # Prepare battery model data
     battery_model_data = {
-        "r_int": r_int_curve_params,
+        "r_int": r_int_rf_params,
         "ocv_curves": ocv_curves,
         "battery_vendor": battery_manufacturer,
     }
 
-    battery_model = BatteryModel(battery_model_data, file_name_hash)
+    battery_model = BatteryModel(battery_model_data, dataset.get_dataset_hash())
 
     generate_battery_libraries(
         battery_model_data,
@@ -735,6 +470,9 @@ def main():
     )
 
     save_battery_model_to_json(battery_model, json_path)
+
+    # Show completion summary
+    console.footer()
 
     if args.debug:
         # Show the plots if in debug mode

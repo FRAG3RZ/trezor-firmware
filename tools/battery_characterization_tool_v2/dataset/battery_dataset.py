@@ -10,6 +10,7 @@ File naming convention: <battery_id>.<timestamp_id>.<battery_mode>.<mode_phase>.
 from pathlib import Path
 from collections import defaultdict
 import numpy as np
+import hashlib
 from typing import Dict, List, Optional, Union, Any
 from .battery_profile import load_battery_profile
 
@@ -56,6 +57,9 @@ class BatteryDataset:
             'skipped_files': 0,
             'error_files': 0
         }
+
+        # Dataset hash (will be calculated after loading)
+        self._dataset_hash = None
 
         # Load the dataset
         self._load_dataset()
@@ -138,6 +142,52 @@ class BatteryDataset:
                 self._stats['loaded_files'] += 1
 
         print(f"Dataset loaded: {self._stats}")
+
+        # Calculate dataset hash after loading
+        self._dataset_hash = self._calculate_dataset_hash()
+
+    def _calculate_dataset_hash(self) -> str:
+        """
+        Calculate an 8-character hash that uniquely identifies the dataset content
+        based on all file names in the dataset.
+
+        Returns:
+            8-character hexadecimal hash string that uniquely identifies the dataset
+        """
+        # Collect all file names from the dataset
+        all_file_names = []
+
+        for battery_id in self._data:
+            for temperature in self._data[battery_id]:
+                for battery_mode in self._data[battery_id][temperature]:
+                    for mode_phase in self._data[battery_id][temperature][battery_mode]:
+                        for timestamp_id in self._data[battery_id][temperature][battery_mode][mode_phase]:
+                            # Get file info to extract the original filename
+                            file_info = self._file_metadata[battery_id][temperature][battery_mode][mode_phase][timestamp_id]
+                            if file_info and 'file_name' in file_info:
+                                all_file_names.append(file_info['file_name'])
+
+        # Sort file names for deterministic hash generation
+        all_file_names.sort()
+
+        # Create a single string from all file names
+        combined_names = '\n'.join(all_file_names)
+
+        # Generate SHA256 hash and truncate to 8 characters
+        hash_object = hashlib.sha256(combined_names.encode('utf-8'))
+        full_hash = hash_object.hexdigest()
+
+        # Return first 8 characters of the hash
+        return full_hash[:8]
+
+    def get_dataset_hash(self) -> str:
+        """
+        Get the 8-character hash that uniquely identifies the dataset content.
+
+        Returns:
+            8-character hexadecimal hash string
+        """
+        return self._dataset_hash
 
     def get_battery_ids(self) -> List[str]:
         """Get list of all battery IDs in the dataset."""
@@ -468,7 +518,7 @@ class BatteryDataset:
         )
 
     def get_statistics(self) -> Dict[str, Any]:
-        """Get dataset statistics."""
+        """Get dataset statistics including dataset hash."""
         stats = self._stats.copy()
         stats.update({
             'unique_battery_ids': len(self.get_battery_ids()),
@@ -478,7 +528,8 @@ class BatteryDataset:
                 for temp in self.get_temperatures(bid)
                 for bm in self.get_battery_modes(bid, temp)
                 for mp in self.get_mode_phases(bid, temp, bm)
-            )
+            ),
+            'dataset_hash': self._dataset_hash
         })
         return stats
 
@@ -522,7 +573,8 @@ class BatteryDataset:
         stats = self.get_statistics()
         return (f"BatteryDataset(path='{self.dataset_path}', "
                 f"batteries={stats['unique_battery_ids']}, "
-                f"profiles={stats['total_profiles']})")
+                f"profiles={stats['total_profiles']}, "
+                f"hash={stats['dataset_hash']})")
 
 
 # Example usage and testing

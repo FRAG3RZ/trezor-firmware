@@ -6,10 +6,28 @@ import os
 
 
 class BatteryModel():
-   
+
     def __init__(self, battery_model_data, file_name_hash, override_hash=None):
         self.battery_model_data = battery_model_data
+        # Keep original keys as they are (could be float or string)
+        self.temp_keys_original = sorted(self.battery_model_data['ocv_curves'].keys(), key=float)
         self.temp_keys_list = sorted([float(t) for t in self.battery_model_data['ocv_curves'].keys()])
+
+        # Create separate temperature key lists for charging and discharging
+        self.temp_keys_chg_list = []
+        self.temp_keys_dischg_list = []
+
+        for temp_key in self.temp_keys_original:
+            ocv_data = self.battery_model_data['ocv_curves'][temp_key]
+            if 'bat_temp_chg' in ocv_data:
+                self.temp_keys_chg_list.append(ocv_data['bat_temp_chg'])
+            if 'bat_temp_dischg' in ocv_data:
+                self.temp_keys_dischg_list.append(ocv_data['bat_temp_dischg'])
+
+        # Sort the temperature lists
+        self.temp_keys_chg_list.sort()
+        self.temp_keys_dischg_list.sort()
+
         self.soc_breakpoint_1 = 0.25
         self.soc_breakpoint_2 = 0.8
 
@@ -19,6 +37,44 @@ class BatteryModel():
             self.model_hash = self._generate_hash(file_name_hash)
 
         print(f"Battery model + file names hash: {self.model_hash}")
+        print(f"Charge temperature range: {min(self.temp_keys_chg_list):.1f}°C to {max(self.temp_keys_chg_list):.1f}°C")
+        print(f"Discharge temperature range: {min(self.temp_keys_dischg_list):.1f}°C to {max(self.temp_keys_dischg_list):.1f}°C")
+
+    def _find_temp_curves(self, target_temp, discharge_mode):
+        """
+        Find the temperature curve keys that bracket the target temperature.
+        Returns (lower_key, upper_key, lower_temp, upper_temp) for interpolation.
+        """
+        # Choose the appropriate temperature list based on mode
+        if discharge_mode:
+            temp_list = self.temp_keys_dischg_list
+        else:
+            temp_list = self.temp_keys_chg_list
+
+        # Clamp temperature to available range
+        target_temp = max(min(target_temp, max(temp_list)), min(temp_list))
+
+        # Find the curves that bracket this temperature
+        for i, temp_key in enumerate(self.temp_keys_original):
+            ocv_data = self.battery_model_data['ocv_curves'][temp_key]
+            actual_temp = ocv_data['bat_temp_dischg'] if discharge_mode else ocv_data['bat_temp_chg']
+
+            if actual_temp >= target_temp:
+                if i == 0:
+                    # Use first curve for both points
+                    return temp_key, temp_key, actual_temp, actual_temp
+                else:
+                    # Find previous curve
+                    prev_key = self.temp_keys_original[i-1]
+                    prev_data = self.battery_model_data['ocv_curves'][prev_key]
+                    prev_temp = prev_data['bat_temp_dischg'] if discharge_mode else prev_data['bat_temp_chg']
+                    return prev_key, temp_key, prev_temp, actual_temp
+
+        # If we get here, use the last curve
+        last_key = self.temp_keys_original[-1]
+        last_data = self.battery_model_data['ocv_curves'][last_key]
+        last_temp = last_data['bat_temp_dischg'] if discharge_mode else last_data['bat_temp_chg']
+        return last_key, last_key, last_temp, last_temp
 
 
     def _generate_hash(self, file_name_hash):
@@ -69,7 +125,7 @@ class BatteryModel():
         """Used when loading an existing model from disk."""
         return cls(json_dict, file_name_hash=model_hash, override_hash=model_hash)
 
-    
+
     #========== Public methods for battery model ==========
 
     def _meas_to_ocv(self, voltage_V, current_mA, temp_deg):
@@ -85,26 +141,24 @@ class BatteryModel():
         return (a + b*temp_deg) / (c + d*temp_deg)
 
     def _total_capacity(self, temp_deg, discharging_mode):
-
-        temp_deg = max(min(temp_deg, self.temp_keys_list[-1]),
-                       self.temp_keys_list[0])
+        """
+        Get total capacity at given temperature and mode, using actual temperature keys.
+        """
+        key1, key2, temp1, temp2 = self._find_temp_curves(temp_deg, discharging_mode)
 
         ocv_curves = self.battery_model_data['ocv_curves']
 
-        for i, curve_temp in enumerate(self.temp_keys_list):
+        if discharging_mode:
+            capacity1 = ocv_curves[key1]['total_capacity_dischg']
+            capacity2 = ocv_curves[key2]['total_capacity_dischg']
+        else:
+            capacity1 = ocv_curves[key1]['total_capacity_chg']
+            capacity2 = ocv_curves[key2]['total_capacity_chg']
 
-            if(curve_temp >= temp_deg):
-                # Linear interpolation
-                t2 = curve_temp
-                t1 = self.temp_keys_list[i-1]
-                if discharging_mode:
-                    AH2 = ocv_curves[str(t2)]['total_capacity_discharge_mean']
-                    AH1 = ocv_curves[str(t1)]['total_capacity_discharge_mean']
-                else:
-                    AH2 = ocv_curves[str(t2)]['total_capacity_charge_mean']
-                    AH1 = ocv_curves[str(t1)]['total_capacity_charge_mean']
-
-                return self._linear_interpolation(AH1, AH2, t1, t2, temp_deg)
+        if temp1 == temp2:
+            return capacity1
+        else:
+            return self._linear_interpolation(capacity1, capacity2, temp1, temp2, temp_deg)
 
     def _linear_interpolation(self, y1, y2, x1, x2, x):
         """
@@ -117,44 +171,35 @@ class BatteryModel():
         b = y2 - a*x2
         return a*x + b
 
-    def _interpolate_ocv_at_temp(self, soc, temp,discharge_mode):
+    def _interpolate_ocv_at_temp(self, soc, temp, discharge_mode):
+        """
+        Interpolate OCV at given temperature using actual temperature keys for charge/discharge.
+        """
+        key1, key2, temp1, temp2 = self._find_temp_curves(temp, discharge_mode)
 
-        temp = max(min(temp, self.temp_keys_list[-1]), self.temp_keys_list[0])
+        voc1 = self._ocv(self.battery_model_data['ocv_curves'][key1], soc, discharge_mode)
+        voc2 = self._ocv(self.battery_model_data['ocv_curves'][key2], soc, discharge_mode)
 
-        for i, curve_temp in enumerate(self.temp_keys_list):
-
-            if(curve_temp >= temp):
-                # Linear interpolation
-                t2 = curve_temp
-                t1 = self.temp_keys_list[i-1]
-                voc2 = self._ocv(self.battery_model_data['ocv_curves'][str(t2)], soc, discharge_mode)
-                voc1 = self._ocv(self.battery_model_data['ocv_curves'][str(t1)], soc, discharge_mode)
-                return self._linear_interpolation(voc1, voc2, t1, t2, temp)
-
-        pass
+        if temp1 == temp2:
+            return voc1
+        else:
+            return self._linear_interpolation(voc1, voc2, temp1, temp2, temp)
 
     def _interpolate_soc_at_temp(self, ocv, temp, discharge_mode):
-
-        temp = max(min(temp, self.temp_keys_list[-1]), self.temp_keys_list[0])
+        """
+        Interpolate SOC at given temperature using actual temperature keys for charge/discharge.
+        """
+        key1, key2, temp1, temp2 = self._find_temp_curves(temp, discharge_mode)
 
         ocv_curves = self.battery_model_data['ocv_curves']
 
-        for i, curve_temp in enumerate(self.temp_keys_list):
+        soc1 = self._soc(ocv_curves[key1], ocv, discharge_mode)
+        soc2 = self._soc(ocv_curves[key2], ocv, discharge_mode)
 
-            if(curve_temp >= temp):
-
-                # Linear interpolation
-                t2 = curve_temp
-                t1 = self.temp_keys_list[i-1]
-
-                soc2 = self._soc(ocv_curves[str(t2)], ocv, discharge_mode)
-                soc1 = self._soc(ocv_curves[str(t1)], ocv, discharge_mode)
-
-                soc_inter = self._linear_interpolation(soc2, soc1, t2, t1, temp)
-
-                return soc_inter
-
-        pass
+        if temp1 == temp2:
+            return soc1
+        else:
+            return self._linear_interpolation(soc1, soc2, temp1, temp2, temp)
 
     def _intrepolate_ocv_slope_at_temp(self, soc, temp, discharge_mode):
         """
@@ -163,45 +208,40 @@ class BatteryModel():
         The derivative is piecewise defined, so we need to check which
         segment the SOC falls into and calculate the slope accordingly.
         """
-
-        temp = max(min(temp, self.temp_keys_list[-1]), self.temp_keys_list[0])
+        key1, key2, temp1, temp2 = self._find_temp_curves(temp, discharge_mode)
 
         ocv_curves = self.battery_model_data['ocv_curves']
 
-        for i, curve_temp in enumerate(self.temp_keys_list):
+        slope1 = self._ocv_slope(ocv_curves[key1], soc, discharge_mode)
+        slope2 = self._ocv_slope(ocv_curves[key2], soc, discharge_mode)
 
-            if(curve_temp >= temp):
-                # Linear interpolation
-                t2 = curve_temp
-                t1 = self.temp_keys_list[i-1]
-
-                slope2 = self._ocv_slope(ocv_curves[str(t2)], soc, discharge_mode)
-                slope1 = self._ocv_slope(ocv_curves[str(t1)], soc, discharge_mode)
-
-                return self._linear_interpolation(slope2, slope1, t2, t1, temp)
-
-        pass
+        if temp1 == temp2:
+            return slope1
+        else:
+            return self._linear_interpolation(slope1, slope2, temp1, temp2, temp)
 
     def _ocv(self, ocv_curve, soc, discharge_mode):
-
+        """
+        Calculate OCV from SOC using the appropriate curve for charge/discharge mode.
+        """
         soc = max(min(soc, 1), 0)
 
-        if(discharge_mode):
-            [m, b, a1, b1, c1, d1, a3, b3, c3, d3] = ocv_curve['ocv_discharge']
+        if discharge_mode:
+            [m, b, a1, b1, c1, d1, a3, b3, c3, d3] = ocv_curve['ocv_dischg']
         else:
-            [m, b, a1, b1, c1, d1, a3, b3, c3, d3] = ocv_curve['ocv_charge']
+            [m, b, a1, b1, c1, d1, a3, b3, c3, d3] = ocv_curve['ocv_chg']
 
-        if(soc < self.soc_breakpoint_1):
+        if soc < self.soc_breakpoint_1:
             # First segment (rational)
             return (a1 + b1*soc) / (c1 + d1*soc)
-        elif(soc >= self.soc_breakpoint_1 and soc <= self.soc_breakpoint_2):
+        elif soc >= self.soc_breakpoint_1 and soc <= self.soc_breakpoint_2:
             # Middle segment (linear)
             return m*soc + b
-        elif(soc > self.soc_breakpoint_2):
+        elif soc > self.soc_breakpoint_2:
             # Third segment (rational)
             return (a3 + b3*soc) / (c3 + d3*soc)
 
-        raise ValueError("SOC if out of range")
+        raise ValueError("SOC is out of range")
 
 
     def _ocv_slope(self, ocv_curve, soc, discharge_mode):
@@ -212,19 +252,18 @@ class BatteryModel():
         segment the SOC falls into and calculate the slope accordingly.
         """
 
-        if(discharge_mode):
-            [m, b, a1, b1, c1, d1, a3, b3, c3, d3] = ocv_curve['ocv_discharge']
+        if discharge_mode:
+            [m, b, a1, b1, c1, d1, a3, b3, c3, d3] = ocv_curve['ocv_dischg']
         else:
-            [m, b, a1, b1, c1, d1, a3, b3, c3, d3] = ocv_curve['ocv_charge']
+            [m, b, a1, b1, c1, d1, a3, b3, c3, d3] = ocv_curve['ocv_chg']
 
-
-        if(soc < self.soc_breakpoint_1):
+        if soc < self.soc_breakpoint_1:
             # First segment (rational)
             return (b1*c1 - a1*d1) / ((c1 + d1*soc)**2)
-        elif(soc >= self.soc_breakpoint_1 and soc <= self.soc_breakpoint_2):
+        elif soc >= self.soc_breakpoint_1 and soc <= self.soc_breakpoint_2:
             # Middle segment (linear)
             return m
-        elif(soc > self.soc_breakpoint_2):
+        elif soc > self.soc_breakpoint_2:
             # Third segment (rational)
             return (b3*c3 - a3*d3) / ((c3 + d3*soc)**2)
         raise ValueError("SOC is out of range")
@@ -235,10 +274,10 @@ class BatteryModel():
         ocv_breakpoint_1 = self._ocv(ocv_curve, self.soc_breakpoint_1, discharge_mode)
         ocv_breakpoint_2 = self._ocv(ocv_curve, self.soc_breakpoint_2, discharge_mode)
 
-        if(discharge_mode):
-            [m, b, a1, b1, c1, d1, a3, b3, c3, d3] = ocv_curve['ocv_discharge']
+        if discharge_mode:
+            [m, b, a1, b1, c1, d1, a3, b3, c3, d3] = ocv_curve['ocv_dischg']
         else:
-            [m, b, a1, b1, c1, d1, a3, b3, c3, d3] = ocv_curve['ocv_charge']
+            [m, b, a1, b1, c1, d1, a3, b3, c3, d3] = ocv_curve['ocv_chg']
 
         if(ocv < ocv_breakpoint_1):
             # First segment (rational)
