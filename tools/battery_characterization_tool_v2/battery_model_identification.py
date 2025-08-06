@@ -6,7 +6,6 @@ import argparse
 
 import matplotlib.pyplot as plt
 from collections import defaultdict
-from dataset.data_filtering import filter_dataset_constants, count_entries
 from dataset.battery_profile import cut_charging_phase, cut_discharging_phase
 from dataset.battery_dataset import BatteryDataset
 from utils.console_formatter import ConsoleFormatter
@@ -19,12 +18,10 @@ from battery_model import (
     estimate_r_int,
     estimate_ocv_curve,
 )
-from generate_battery_libraries_v2 import generate_battery_libraries
-from dataset.battery_profile import load_battery_profile
+from generate_c_library import generate_battery_libraries
 from fuel_gauge.profile_data_utils import get_mean_temp
 from fuel_gauge.battery_model import (
     BatteryModel,
-    hashlib,
     save_battery_model_to_json,
 )
 
@@ -33,7 +30,6 @@ from archive.battery_profiling import rational_fit
 DEFAULT_MAX_CHARGE_VOLTAGE = 3.9
 DEFAULT_MAX_DISCHARGE_VOLTAGE = 3.0
 DEFAULT_OCV_SAMPLES = 100
-
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -61,7 +57,6 @@ def parse_arguments():
     )
 
     return parser.parse_args()
-
 
 def prompt_for_config_file():
 
@@ -124,13 +119,9 @@ def load_config(toml_path):
 def create_battery_dataset(dataset_path) -> BatteryDataset:
 
     battery_dataset = BatteryDataset(dataset_path, load_data=True)
-
-    print(f"Dataset loaded: {battery_dataset}")
-
     battery_dataset.print_structure(max_depth=3)
 
     return battery_dataset
-
 
 def run_r_int_identification(dataset, debug=False):
     """Takes all switching discharge profiles from the dataset and for every profile estimates the internal
@@ -477,7 +468,6 @@ def main():
     if args.debug:
         # Show the plots if in debug mode
         plt.show()
-
 
 if __name__ == "__main__":
     main()
