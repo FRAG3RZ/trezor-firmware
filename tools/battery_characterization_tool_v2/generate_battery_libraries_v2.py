@@ -19,24 +19,32 @@ from pathlib import Path
 
 def generate_battery_data_header(battery_model_data, battery_name, output_path):
     """
-    Generate battery data header file containing only the characterized data
+    Generate C header file containing battery data lookup tables and parameters
 
     Parameters:
-    - battery_model_data: Dictionary containing 'r_int' parameters and 'ocv_curves' data
-    - battery_name: Name identifier for the battery (used in header guards)
+    - battery_model_data: Dictionary containing the complete battery model data
+    - battery_name: String identifier for the battery model
     - output_path: Path to save the header file
     """
-    # Get temperature points (sorted)
-    temp_points = sorted(list(battery_model_data['ocv_curves'].keys()))
-    num_temp_points = len(temp_points)
+    header_guard = f"BATTERY_DATA_{battery_name.upper()}_H"
 
-    # Create safe header guard name
-    header_guard = f"BATTERY_DATA_{battery_name.upper().replace('-', '_')}_H"
+    # Extract temperature points from the battery model data
+    # Get separate temperature arrays for charging and discharging
+    temp_keys = sorted(list(battery_model_data['ocv_curves'].keys()))
+    temp_points_dischg = []
+    temp_points_chg = []
+    for key in temp_keys:
+        temp_data = battery_model_data['ocv_curves'][key]
+        temp_points_dischg.append(temp_data['bat_temp_dischg'])
+        temp_points_chg.append(temp_data['bat_temp_chg'])
+    
+    # Sort both temperature arrays
+    temp_points_dischg = sorted(temp_points_dischg)
+    temp_points_chg = sorted(temp_points_chg)
 
-    # Start building the header file content
     header = [
         "/**",
-        f" * Battery Data: {battery_name}",
+        f" * Battery Data: {battery_name.upper()}",
         " * Auto-generated from battery characterization data",
         " * Contains lookup tables and parameters for the specific battery model",
         " */",
@@ -47,51 +55,62 @@ def generate_battery_data_header(battery_model_data, battery_name, output_path):
         "#include <stdint.h>",
         "",
         "/**",
-        " * Battery Specifications:",
-        f" * Model: {battery_name}",
+        f" * Battery Specifications:",
+        f" * Model: {battery_name.upper()}",
         " * Chemistry: LiFePO4",
         " * Characterized on: TODO - Add date",
         " */",
         "",
         "// Configuration",
-        "#define BATTERY_NUM_TEMP_POINTS " + str(num_temp_points),
+        f"#define BATTERY_NUM_TEMP_POINTS {len(temp_keys)}",
         "",
         "// SOC breakpoints for piecewise functions",
         "#define BATTERY_SOC_BREAKPOINT_1 0.25f",
         "#define BATTERY_SOC_BREAKPOINT_2 0.8f",
         "",
-        "// Temperature points array (in Celsius)",
-        "static const float BATTERY_TEMP_POINTS[BATTERY_NUM_TEMP_POINTS] = {",
-        "    " + ", ".join([f"{temp:.2f}f" for temp in temp_points]),
-        "};",
-        "",
-        "// Internal resistance curve parameters (rational function parameters a+b*t)/(c+d*t)",
-        "static const float BATTERY_R_INT_PARAMS[4] = {",
+        "// Temperature points arrays (in Celsius)",
+        "// Discharge temperatures",
+        f"static const float BATTERY_TEMP_POINTS_DISCHG[BATTERY_NUM_TEMP_POINTS] = {{",
     ]
 
+    # Add discharge temperature points
+    temp_strings_dischg = [f"    {temp:.2f}f" for temp in temp_points_dischg]
+    header.append(", ".join(temp_strings_dischg))
+    header.append("};")
+    header.append("")
+    
+    # Add charge temperature points  
+    header.append("// Charge temperatures")
+    header.append(f"static const float BATTERY_TEMP_POINTS_CHG[BATTERY_NUM_TEMP_POINTS] = {{")
+    temp_strings_chg = [f"    {temp:.2f}f" for temp in temp_points_chg]
+    header.append(", ".join(temp_strings_chg))
+    header.append("};")
+    header.append("")
+
     # Add internal resistance parameters
+    header.append("// Internal resistance curve parameters (rational function parameters a+b*t)/(c+d*t)")
+    header.append("static const float BATTERY_R_INT_PARAMS[4] = {")
     r_int_params = battery_model_data['r_int']
-    header.extend([
-        "    // a, b, c, d for rational function (a + b*t)/(c + d*t)",
-        f"    {r_int_params[0]:.6f}f, {r_int_params[1]:.6f}f, {r_int_params[2]:.6f}f, {r_int_params[3]:.6f}f",
-        "};",
-        ""
-    ])
+    header.append(f"    // a, b, c, d for rational function (a + b*t)/(c + d*t)")
+    header.append(f"    {r_int_params[0]:.6f}f, {r_int_params[1]:.6f}f, {r_int_params[2]:.6f}f, {r_int_params[3]:.6f}f")
+    header.append("};")
+    header.append("")
 
     # Add discharge OCV curve parameters for each temperature
     header.append("// Discharge OCV curve parameters for each temperature")
     header.append("static const float BATTERY_OCV_DISCHARGE_PARAMS[BATTERY_NUM_TEMP_POINTS][10] = {")
 
-    for temp_idx, temp in enumerate(temp_points):
-        ocv_data = battery_model_data['ocv_curves'][temp]
-        ocv_params = ocv_data['ocv_discharge']
+    for temp_idx, temp_key in enumerate(temp_keys):
+        ocv_data = battery_model_data['ocv_curves'][temp_key]
+        ocv_params = ocv_data['ocv_dischg']  # Updated key name
+        actual_temp = ocv_data['bat_temp_dischg']
 
-        header.append(f"    // Temperature: {temp:.2f}°C")
+        header.append(f"    // Temperature: {actual_temp:.2f}°C (key: {temp_key})")
         header.append("    {")
         header.append(f"        {ocv_params[0]:.6f}f, {ocv_params[1]:.6f}f, // m, b (linear segment)")
         header.append(f"        {ocv_params[2]:.6f}f, {ocv_params[3]:.6f}f, {ocv_params[4]:.6f}f, {ocv_params[5]:.6f}f, // a1, b1, c1, d1 (first rational segment)")
         header.append(f"        {ocv_params[6]:.6f}f, {ocv_params[7]:.6f}f, {ocv_params[8]:.6f}f, {ocv_params[9]:.6f}f  // a3, b3, c3, d3 (third rational segment)")
-        header.append("    }" + ("," if temp_idx < len(temp_points)-1 else ""))
+        header.append("    }" + ("," if temp_idx < len(temp_keys)-1 else ""))
 
     header.append("};")
     header.append("")
@@ -100,16 +119,17 @@ def generate_battery_data_header(battery_model_data, battery_name, output_path):
     header.append("// Charge OCV curve parameters for each temperature")
     header.append("static const float BATTERY_OCV_CHARGE_PARAMS[BATTERY_NUM_TEMP_POINTS][10] = {")
 
-    for temp_idx, temp in enumerate(temp_points):
-        ocv_data = battery_model_data['ocv_curves'][temp]
-        ocv_params = ocv_data['ocv_charge']
+    for temp_idx, temp_key in enumerate(temp_keys):
+        ocv_data = battery_model_data['ocv_curves'][temp_key]
+        ocv_params = ocv_data['ocv_chg']  # Updated key name
+        actual_temp = ocv_data['bat_temp_chg']
 
-        header.append(f"    // Temperature: {temp:.2f}°C")
+        header.append(f"    // Temperature: {actual_temp:.2f}°C (key: {temp_key})")
         header.append("    {")
         header.append(f"        {ocv_params[0]:.6f}f, {ocv_params[1]:.6f}f, // m, b (linear segment)")
         header.append(f"        {ocv_params[2]:.6f}f, {ocv_params[3]:.6f}f, {ocv_params[4]:.6f}f, {ocv_params[5]:.6f}f, // a1, b1, c1, d1 (first rational segment)")
         header.append(f"        {ocv_params[6]:.6f}f, {ocv_params[7]:.6f}f, {ocv_params[8]:.6f}f, {ocv_params[9]:.6f}f  // a3, b3, c3, d3 (third rational segment)")
-        header.append("    }" + ("," if temp_idx < len(temp_points)-1 else ""))
+        header.append("    }" + ("," if temp_idx < len(temp_keys)-1 else ""))
 
     header.append("};")
     header.append("")
@@ -118,13 +138,14 @@ def generate_battery_data_header(battery_model_data, battery_name, output_path):
     header.append("// Battery capacity data for each temperature")
     header.append("static const float BATTERY_CAPACITY[BATTERY_NUM_TEMP_POINTS][2] = {")
 
-    for temp_idx, temp in enumerate(temp_points):
-        ocv_data = battery_model_data['ocv_curves'][temp]
-        discharge_capacity = ocv_data['total_capacity_discharge_mean']
-        charge_capacity = ocv_data['total_capacity_charge_mean']
+    for temp_idx, temp_key in enumerate(temp_keys):
+        ocv_data = battery_model_data['ocv_curves'][temp_key]
+        discharge_capacity = ocv_data['total_capacity_dischg']  # Updated key name
+        charge_capacity = ocv_data['total_capacity_chg']  # Updated key name
+        actual_temp = ocv_data['bat_temp_dischg']
 
-        header.append(f"    // Temperature: {temp:.2f}°C")
-        header.append(f"    {{ {discharge_capacity:.2f}f, {charge_capacity:.2f}f }}" + ("," if temp_idx < len(temp_points)-1 else ""))
+        header.append(f"    // Temperature: {actual_temp:.2f}°C (key: {temp_key})")
+        header.append(f"    {{ {discharge_capacity:.2f}f, {charge_capacity:.2f}f }}" + ("," if temp_idx < len(temp_keys)-1 else ""))
 
     header.append("};")
     header.append("")
@@ -342,21 +363,24 @@ def generate_battery_model_implementation(output_path):
         "}",
         "",
         "float battery_total_capacity(float temperature, bool discharging_mode) {",
+        "    // Select appropriate temperature array based on mode",
+        "    const float* temp_points = discharging_mode ? BATTERY_TEMP_POINTS_DISCHG : BATTERY_TEMP_POINTS_CHG;",
+        "    ",
         "    // Handle out-of-bounds temperatures",
-        "    if (temperature <= BATTERY_TEMP_POINTS[0]) {",
+        "    if (temperature <= temp_points[0]) {",
         "        return BATTERY_CAPACITY[0][discharging_mode ? 0 : 1];",
         "    }",
         "    ",
-        "    if (temperature >= BATTERY_TEMP_POINTS[BATTERY_NUM_TEMP_POINTS - 1]) {",
+        "    if (temperature >= temp_points[BATTERY_NUM_TEMP_POINTS - 1]) {",
         "        return BATTERY_CAPACITY[BATTERY_NUM_TEMP_POINTS - 1][discharging_mode ? 0 : 1];",
         "    }",
         "    ",
         "    // Find temperature bracket",
         "    for (int i = 0; i < BATTERY_NUM_TEMP_POINTS - 1; i++) {",
-        "        if (temperature < BATTERY_TEMP_POINTS[i + 1]) {",
+        "        if (temperature < temp_points[i + 1]) {",
         "            return linear_interpolate(temperature,",
-        "                                     BATTERY_TEMP_POINTS[i], BATTERY_CAPACITY[i][discharging_mode ? 0 : 1],",
-        "                                     BATTERY_TEMP_POINTS[i + 1], BATTERY_CAPACITY[i + 1][discharging_mode ? 0 : 1]);",
+        "                                     temp_points[i], BATTERY_CAPACITY[i][discharging_mode ? 0 : 1],",
+        "                                     temp_points[i + 1], BATTERY_CAPACITY[i + 1][discharging_mode ? 0 : 1]);",
         "        }",
         "    }",
         "    ",
@@ -376,15 +400,18 @@ def generate_battery_model_implementation(output_path):
         "    // Clamp SOC to valid range",
         "    soc = (soc < 0.0f) ? 0.0f : ((soc > 1.0f) ? 1.0f : soc);",
         "    ",
+        "    // Select appropriate temperature array based on mode",
+        "    const float* temp_points = discharging_mode ? BATTERY_TEMP_POINTS_DISCHG : BATTERY_TEMP_POINTS_CHG;",
+        "    ",
         "    // Handle out-of-bounds temperatures",
-        "    if (temperature <= BATTERY_TEMP_POINTS[0]) {",
+        "    if (temperature <= temp_points[0]) {",
         "        const float* params = discharging_mode ? ",
         "                            BATTERY_OCV_DISCHARGE_PARAMS[0] : ",
         "                            BATTERY_OCV_CHARGE_PARAMS[0];",
         "        return calc_ocv(params, soc);",
         "    }",
         "    ",
-        "    if (temperature >= BATTERY_TEMP_POINTS[BATTERY_NUM_TEMP_POINTS - 1]) {",
+        "    if (temperature >= temp_points[BATTERY_NUM_TEMP_POINTS - 1]) {",
         "        const float* params = discharging_mode ? ",
         "                            BATTERY_OCV_DISCHARGE_PARAMS[BATTERY_NUM_TEMP_POINTS - 1] : ",
         "                            BATTERY_OCV_CHARGE_PARAMS[BATTERY_NUM_TEMP_POINTS - 1];",
@@ -393,7 +420,7 @@ def generate_battery_model_implementation(output_path):
         "    ",
         "    // Find temperature bracket and interpolate",
         "    for (int i = 0; i < BATTERY_NUM_TEMP_POINTS - 1; i++) {",
-        "        if (temperature < BATTERY_TEMP_POINTS[i + 1]) {",
+        "        if (temperature < temp_points[i + 1]) {",
         "            const float* params_low = discharging_mode ? ",
         "                                    BATTERY_OCV_DISCHARGE_PARAMS[i] : ",
         "                                    BATTERY_OCV_CHARGE_PARAMS[i];",
@@ -406,8 +433,8 @@ def generate_battery_model_implementation(output_path):
         "            float ocv_high = calc_ocv(params_high, soc);",
         "            ",
         "            return linear_interpolate(temperature,",
-        "                                     BATTERY_TEMP_POINTS[i], ocv_low,",
-        "                                     BATTERY_TEMP_POINTS[i + 1], ocv_high);",
+        "                                     temp_points[i], ocv_low,",
+        "                                     temp_points[i + 1], ocv_high);",
         "        }",
         "    }",
         "    ",
@@ -422,15 +449,18 @@ def generate_battery_model_implementation(output_path):
         "    // Clamp SOC to valid range",
         "    soc = (soc < 0.0f) ? 0.0f : ((soc > 1.0f) ? 1.0f : soc);",
         "    ",
+        "    // Select appropriate temperature array based on mode",
+        "    const float* temp_points = discharging_mode ? BATTERY_TEMP_POINTS_DISCHG : BATTERY_TEMP_POINTS_CHG;",
+        "    ",
         "    // Handle out-of-bounds temperatures",
-        "    if (temperature <= BATTERY_TEMP_POINTS[0]) {",
+        "    if (temperature <= temp_points[0]) {",
         "        const float* params = discharging_mode ? ",
         "                            BATTERY_OCV_DISCHARGE_PARAMS[0] : ",
         "                            BATTERY_OCV_CHARGE_PARAMS[0];",
         "        return calc_ocv_slope(params, soc);",
         "    }",
         "    ",
-        "    if (temperature >= BATTERY_TEMP_POINTS[BATTERY_NUM_TEMP_POINTS - 1]) {",
+        "    if (temperature >= temp_points[BATTERY_NUM_TEMP_POINTS - 1]) {",
         "        const float* params = discharging_mode ? ",
         "                            BATTERY_OCV_DISCHARGE_PARAMS[BATTERY_NUM_TEMP_POINTS - 1] : ",
         "                            BATTERY_OCV_CHARGE_PARAMS[BATTERY_NUM_TEMP_POINTS - 1];",
@@ -439,7 +469,7 @@ def generate_battery_model_implementation(output_path):
         "    ",
         "    // Find temperature bracket and interpolate",
         "    for (int i = 0; i < BATTERY_NUM_TEMP_POINTS - 1; i++) {",
-        "        if (temperature < BATTERY_TEMP_POINTS[i + 1]) {",
+        "        if (temperature < temp_points[i + 1]) {",
         "            const float* params_low = discharging_mode ? ",
         "                                    BATTERY_OCV_DISCHARGE_PARAMS[i] : ",
         "                                    BATTERY_OCV_CHARGE_PARAMS[i];",
@@ -452,8 +482,8 @@ def generate_battery_model_implementation(output_path):
         "            float slope_high = calc_ocv_slope(params_high, soc);",
         "            ",
         "            return linear_interpolate(temperature,",
-        "                                     BATTERY_TEMP_POINTS[i], slope_low,",
-        "                                     BATTERY_TEMP_POINTS[i + 1], slope_high);",
+        "                                     temp_points[i], slope_low,",
+        "                                     temp_points[i + 1], slope_high);",
         "        }",
         "    }",
         "    ",
@@ -465,15 +495,18 @@ def generate_battery_model_implementation(output_path):
         "}",
         "",
         "float battery_soc(float ocv, float temperature, bool discharging_mode) {",
+        "    // Select appropriate temperature array based on mode",
+        "    const float* temp_points = discharging_mode ? BATTERY_TEMP_POINTS_DISCHG : BATTERY_TEMP_POINTS_CHG;",
+        "    ",
         "    // Handle out-of-bounds temperatures",
-        "    if (temperature <= BATTERY_TEMP_POINTS[0]) {",
+        "    if (temperature <= temp_points[0]) {",
         "        const float* params = discharging_mode ? ",
         "                            BATTERY_OCV_DISCHARGE_PARAMS[0] : ",
         "                            BATTERY_OCV_CHARGE_PARAMS[0];",
         "        return calc_soc_from_ocv(params, ocv);",
         "    }",
         "    ",
-        "    if (temperature >= BATTERY_TEMP_POINTS[BATTERY_NUM_TEMP_POINTS - 1]) {",
+        "    if (temperature >= temp_points[BATTERY_NUM_TEMP_POINTS - 1]) {",
         "        const float* params = discharging_mode ? ",
         "                            BATTERY_OCV_DISCHARGE_PARAMS[BATTERY_NUM_TEMP_POINTS - 1] : ",
         "                            BATTERY_OCV_CHARGE_PARAMS[BATTERY_NUM_TEMP_POINTS - 1];",
@@ -482,7 +515,7 @@ def generate_battery_model_implementation(output_path):
         "    ",
         "    // Find temperature bracket and interpolate",
         "    for (int i = 0; i < BATTERY_NUM_TEMP_POINTS - 1; i++) {",
-        "        if (temperature < BATTERY_TEMP_POINTS[i + 1]) {",
+        "        if (temperature < temp_points[i + 1]) {",
         "            const float* params_low = discharging_mode ? ",
         "                                    BATTERY_OCV_DISCHARGE_PARAMS[i] : ",
         "                                    BATTERY_OCV_CHARGE_PARAMS[i];",
@@ -495,8 +528,8 @@ def generate_battery_model_implementation(output_path):
         "            float soc_high = calc_soc_from_ocv(params_high, ocv);",
         "            ",
         "            return linear_interpolate(temperature,",
-        "                                     BATTERY_TEMP_POINTS[i], soc_low,",
-        "                                     BATTERY_TEMP_POINTS[i + 1], soc_high);",
+        "                                     temp_points[i], soc_low,",
+        "                                     temp_points[i + 1], soc_high);",
         "        }",
         "    }",
         "    ",
