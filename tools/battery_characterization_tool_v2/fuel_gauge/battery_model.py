@@ -78,7 +78,6 @@ class BatteryModel():
 
 
     def _generate_hash(self, file_name_hash):
-        print(f"File name hash: {file_name_hash}")  # debug print
 
         def convert_np(obj):
             if isinstance(obj, np.ndarray):
@@ -108,13 +107,7 @@ class BatteryModel():
 
         # Use pretty-printing with indentation for consistent hashing
         data_str = json.dumps(clean_data, sort_keys=True, default=convert_np, indent=2)
-
-        print("DEBUG JSON string (full):")
-        print(data_str)  # print entire JSON string, pretty-printed
-
         data_hash = hashlib.sha256(data_str.encode('utf-8')).hexdigest()
-
-        print(f"DEBUG Data hash: {data_hash}")  # debug print
 
         combined = f"{data_hash}|{file_name_hash}"
         final_hash = hashlib.sha256(combined.encode('utf-8')).hexdigest()
@@ -291,9 +284,6 @@ class BatteryModel():
 
         raise ValueError("OCV is out of range")
 
-
-
-
 #========FUNCTIONS FOR JSON SERIALIZATION==========
 
 def round_floats(obj, precision=8):
@@ -323,7 +313,6 @@ def prepare_for_serialization(data):
     """Sort, round, and convert numpy for consistent hashing/serialization."""
     return recursive_sort(round_floats(data))
 
-
 def save_battery_model_to_json(battery_model, directory):
     """
     Saves the BatteryModel to a JSON file named <model_hash>.json in the specified directory,
@@ -338,9 +327,7 @@ def save_battery_model_to_json(battery_model, directory):
     with open(file_path, 'w') as f:
         json.dump(clean_data, f, indent=2, default=convert_np)
 
-    print(f"Battery model saved as: {file_path}")
     return battery_model.model_hash
-
 
 def load_battery_model_from_hash(battery_manufacturer, model_hash, directory):
     """
