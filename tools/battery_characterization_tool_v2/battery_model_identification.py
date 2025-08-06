@@ -5,7 +5,6 @@ import sys
 import argparse
 
 import matplotlib.pyplot as plt
-from collections import defaultdict
 from dataset.battery_profile import cut_charging_phase, cut_discharging_phase
 from dataset.battery_dataset import BatteryDataset
 from utils.console_formatter import ConsoleFormatter
@@ -25,7 +24,8 @@ from fuel_gauge.battery_model import (
     save_battery_model_to_json,
 )
 
-from archive.battery_profiling import rational_fit
+# Global console formatter instance
+console = ConsoleFormatter()
 
 DEFAULT_MAX_CHARGE_VOLTAGE = 3.9
 DEFAULT_MAX_DISCHARGE_VOLTAGE = 3.0
@@ -59,37 +59,38 @@ def parse_arguments():
     return parser.parse_args()
 
 def prompt_for_config_file():
-
     config_dir = Path(__file__).parent / "battery_model" / "models"
     toml_files = list(config_dir.glob("*.toml"))
 
     if not toml_files:
-        print("ERROR: No .toml config files found in 'battery_model/models/.'")
+        console.error("No .toml config files found in 'battery_model/models/'")
         sys.exit(1)
 
-    print("\nAvailable config files in 'battery_model/models/.':")
+    console.info("Available config files in 'battery_model/models/':")
     for i, file in enumerate(toml_files, 1):
-        print(f"  {i}. {file.name}")
+        console.info(f"  {i}. {file.name}")
 
     while True:
         try:
-            choice = input("Enter config name or number: ").strip()
+            choice = input("\nEnter config name or number: ").strip()
             if choice.isdigit():
                 index = int(choice) - 1
                 if 0 <= index < len(toml_files):
+                    console.success(f"Selected config: {toml_files[index].name}")
                     return toml_files[index]
                 else:
-                    print("ERROR: Invalid number.")
+                    console.error("Invalid number. Please try again.")
             else:
                 file_path = config_dir / (
                     choice if choice.endswith(".toml") else f"{choice}.toml"
                 )
                 if file_path.exists():
+                    console.success(f"Selected config: {file_path.name}")
                     return file_path
                 else:
-                    print("ERROR: File not found.")
+                    console.error("File not found. Please try again.")
         except KeyboardInterrupt:
-            print("\nOperation cancelled.")
+            console.warning("Operation cancelled by user.")
             sys.exit(0)
 
 
@@ -97,8 +98,9 @@ def load_config(toml_path):
     try:
         with open(toml_path, "rb") as f:
             config = tomllib.load(f)
+        console.success(f"Configuration loaded from: {toml_path.name}")
     except Exception as e:
-        print(f"ERROR: Failed to load config: {e}")
+        console.error(f"Failed to load config: {e}")
         sys.exit(1)
 
     # Match exact variable names from config
@@ -127,7 +129,6 @@ def run_r_int_identification(dataset, debug=False):
     """Takes all switching discharge profiles from the dataset and for every profile estimates the internal
     resistance. All estimations are then fitted with a rational function and its parametrs are returned.
     """
-    console = ConsoleFormatter()
     console.subsection("Internal Resistance (R_int) Identification")
 
     r_int_points = []
@@ -178,7 +179,6 @@ def run_r_int_identification(dataset, debug=False):
 
 def run_ocv_identification(dataset, r_int_rf_params, charging=False, debug=False):
     """Takes all linear discharge profiles from the dataset and for every profile extracts the open-circuit voltage"""
-    console = ConsoleFormatter()
     mode_name = "Charging" if charging else "Discharging"
     console.subsection(f"OCV Identification - {mode_name} Profiles")
 
@@ -357,9 +357,6 @@ def extract_soc_and_rint_curves(
 
 def main():
 
-    # Initialize console formatter
-    console = ConsoleFormatter()
-
     # Print header
     console.header(
         "BATTERY CHARACTERIZATION TOOL",
@@ -372,13 +369,14 @@ def main():
 
     # Handle config file selection
     if args.config_file:
-        config_file = Path(args.config_file)
+        config_file_path = Path(args.config_file)
 
-        if not config_file.suffix == ".toml":
-            raise IOError("Config file must be a .toml file")
+        if not config_file_path.suffix == ".toml":
+            console.error("Config file must be a .toml file")
+            sys.exit(1)
 
         if not config_file_path.exists():
-            print(f"Config file '{config_file}' not found.")
+            console.error(f"Config file '{config_file_path}' not found.")
             sys.exit(1)
     else:
         config_file_path = prompt_for_config_file()
@@ -445,6 +443,8 @@ def main():
 
     console.success("Analysis results table generated")
 
+    console.section("Export battery model")
+
     # Prepare battery model data
     battery_model_data = {
         "r_int": r_int_rf_params,
@@ -454,13 +454,21 @@ def main():
 
     battery_model = BatteryModel(battery_model_data, dataset.get_dataset_hash())
 
+    console.info(f"Battery model created with hash: {battery_model.model_hash}")
+
+    save_battery_model_to_json(battery_model, json_path)
+
+    console.success("Battery model JSON file created")
+
+    console.section("Generate C library")
+
     generate_battery_libraries(
         battery_model_data,
         output_dir=args.output_dir,
         battery_name=battery_manufacturer,
     )
 
-    save_battery_model_to_json(battery_model, json_path)
+    console.success("C library files generated successfully")
 
     # Show completion summary
     console.footer()
