@@ -1,2 +1,0 @@
-time,power_state,usb,wlc,battery_voltage,battery_current,battery_temp,battery_soc,battery_soc_latched,pmic_die_temp,wlc_voltage,wlc_current,wlc_die_temp,system_voltage
-1753254106.9456134,5,USB_connected,WLC_disconnected,3.201,0.000,20.938,0.01,0.00,26.111,0.000,0.000,0.000,4.661
