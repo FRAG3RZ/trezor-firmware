@@ -1,10 +1,5 @@
 
-
-regression_results/
 exported_data/
-exported_libraries_updated/
-generated_output/
-images/
 venv/
 **/.ipynb
 **/.ipynb_checkpoints/
