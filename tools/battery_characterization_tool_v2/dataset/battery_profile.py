@@ -255,3 +255,15 @@ def cut_discharging_phase(data):
     discharge_data.time = discharge_data.time - discharge_data.time[0]
 
     return discharge_data
+
+
+def get_mean_temp(temp):
+    mean     = sum(temp) / len(temp)
+    variance = (1/mean)*np.sum((temp-mean)**2)
+    return mean, variance
+
+def time_to_minutes(time, offset=None):
+    if(offset is None):
+        return (time - time[0]) / 60000
+    else:
+        return (time-offset) / 60000

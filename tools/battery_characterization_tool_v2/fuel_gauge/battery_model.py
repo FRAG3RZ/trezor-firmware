@@ -3,7 +3,7 @@ import numpy as np
 import hashlib
 import json
 import os
-
+from pathlib import Path
 
 class BatteryModel():
 
@@ -112,6 +112,13 @@ class BatteryModel():
         combined = f"{data_hash}|{file_name_hash}"
         final_hash = hashlib.sha256(combined.encode('utf-8')).hexdigest()
         return final_hash[:8]
+
+    def get_hash(self):
+        """
+        Returns the hash of the battery model data.
+        This is used to identify the model uniquely.
+        """
+        return self.model_hash
 
     @classmethod
     def from_json(cls, json_dict, model_hash):
@@ -329,16 +336,31 @@ def save_battery_model_to_json(battery_model, directory):
 
     return battery_model.model_hash
 
-def load_battery_model_from_hash(battery_manufacturer, model_hash, directory):
+def load_battery_model_from_hash(model_file_path):
     """
-    Loads a BatteryModel instance from a JSON file named <model_hash>.json in the specified directory,
-    preparing the loaded data identically to preserve hash integrity.
+    Loads a BatteryModel from the specified JSON file path.
+    Extracts the hash from the filename and prepares the loaded data
+    identically to preserve hash integrity.
     """
-    file_name = f"{model_hash}.json"
-    file_path = os.path.join(directory, file_name)
 
-    if not os.path.isfile(file_path):
-        raise FileNotFoundError(f"No battery model file found for hash: {model_hash}")
+    file_path = Path(model_file_path)
+
+    if not file_path.exists():
+        raise FileNotFoundError(f"No battery model file found at: {model_file_path}")
+
+    # Extract hash from filename (format: <vendor>_<hash>.json)
+    filename = file_path.stem  # Remove .json extension
+    if '_' in filename:
+        # Split by last underscore to get hash
+        parts = filename.rsplit('_', 1)
+        if len(parts) == 2:
+            model_hash = parts[1]
+        else:
+            # Fallback: use entire filename as hash
+            model_hash = filename
+    else:
+        # Fallback: use entire filename as hash
+        model_hash = filename
 
     with open(file_path, 'r') as f:
         battery_model_data = json.load(f)
@@ -346,6 +368,6 @@ def load_battery_model_from_hash(battery_manufacturer, model_hash, directory):
     # Prepare data to ensure the same hash calculation (if needed)
     battery_model_data = prepare_for_serialization(battery_model_data)
 
-    # Pass the hash string (without '.json') as the second argument
+    # Create BatteryModel instance with the extracted hash
     return BatteryModel.from_json(battery_model_data, model_hash)
 

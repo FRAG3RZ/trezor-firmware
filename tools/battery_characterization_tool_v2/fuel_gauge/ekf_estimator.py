@@ -11,7 +11,12 @@ class EkfEstimator():
                  Q=None,
                  R_agressive=None,
                  Q_agressive=None,
-                 P_init=None):
+                 P_init=None,
+                 label=None):
+
+        self.name = "EKF estimator"
+        if label is not None:
+            self.name = self.name + ": " + label
 
         # Batery model consis of characterized battery data
         self.bm = battery_model

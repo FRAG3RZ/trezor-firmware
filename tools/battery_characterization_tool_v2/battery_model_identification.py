@@ -5,7 +5,7 @@ import sys
 import argparse
 
 import matplotlib.pyplot as plt
-from dataset.battery_profile import cut_charging_phase, cut_discharging_phase
+from dataset.battery_profile import cut_charging_phase, cut_discharging_phase, get_mean_temp
 from dataset.battery_dataset import BatteryDataset
 from utils.console_formatter import ConsoleFormatter
 
@@ -18,7 +18,6 @@ from battery_model import (
     estimate_ocv_curve,
 )
 from generate_c_library import generate_battery_libraries
-from fuel_gauge.profile_data_utils import get_mean_temp
 from fuel_gauge.battery_model import (
     BatteryModel,
     save_battery_model_to_json,

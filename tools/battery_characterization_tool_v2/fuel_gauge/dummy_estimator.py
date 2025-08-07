@@ -6,9 +6,13 @@ from .battery_model import BatteryModel
 class DummyEstimator():
 
     def __init__(self,
-                 battery_model : BatteryModel):
+                 battery_model : BatteryModel,
+                 label=None):
 
         # Batery model consis of characterized battery data
+        self.name="Dummy Estimator"
+        if label is not None:
+            self.name = self.name + ": " + label
         self.bm = battery_model
         self.reset()
 

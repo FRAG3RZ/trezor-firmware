@@ -293,6 +293,7 @@ class BatteryDataset:
         Returns:
             New BatteryDataset instance with filtered data
         """
+
         # Create new instance
         filtered_dataset = BatteryDataset.__new__(BatteryDataset)
         filtered_dataset.dataset_path = self.dataset_path
@@ -311,6 +312,10 @@ class BatteryDataset:
                 )
             )
         )
+
+        #Inherit dataset hash
+        filtered_dataset._dataset_hash = self._dataset_hash
+
         filtered_dataset._stats = {'total_files': 0, 'loaded_files': 0, 'skipped_files': 0, 'error_files': 0}
 
         # Apply filters
@@ -339,6 +344,7 @@ class BatteryDataset:
                                 self._data[battery_id][temperature][battery_mode][mode_phase][timestamp_id]
                             filtered_dataset._file_metadata[battery_id][temperature][battery_mode][mode_phase][timestamp_id] = \
                                 self._file_metadata[battery_id][temperature][battery_mode][mode_phase][timestamp_id]
+                            filtered_dataset._stats['total_files'] += 1
                             filtered_dataset._stats['loaded_files'] += 1
 
         return filtered_dataset

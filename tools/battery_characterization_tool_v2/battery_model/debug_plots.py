@@ -1,4 +1,5 @@
 
+from dataset.battery_profile import time_to_minutes
 import matplotlib.pyplot as plt
 
 # Plot settings
@@ -25,12 +26,6 @@ def plot_general_config(ax, title, xlabel, ylabel):
 
     for l in ax.lines:
         l.set_linewidth(FIG_LINE_WIDTH)
-
-def time_to_minutes(time, offset=None):
-    if(offset is None):
-        return (time - time[0]) / 60000
-    else:
-        return (time-offset) / 60000
 
 def identify_r_int_debug_plot(time, vbat, ibat,
                               transition_indeces,
