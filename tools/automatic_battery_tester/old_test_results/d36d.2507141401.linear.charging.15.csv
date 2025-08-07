@@ -1,0 +1,7 @@
+time,power_state,usb,wlc,battery_voltage,battery_current,battery_temp,battery_soc,battery_soc_latched,pmic_die_temp,wlc_voltage,wlc_current,wlc_die_temp,system_voltage
+1752494475.7928388,5,USB_connected,WLC_disconnected,3.274,-192.600,30.243,0.41,0.41,45.133,0.000,0.000,0.000,4.156
+1752494476.875254,5,USB_connected,WLC_disconnected,3.274,-192.375,30.243,0.66,0.66,45.926,0.000,0.000,0.000,4.156
+1752494477.9602492,5,USB_connected,WLC_disconnected,3.279,-192.375,30.243,0.87,0.87,47.511,0.000,0.000,0.000,4.131
+1752494479.0449631,5,USB_connected,WLC_disconnected,3.279,-192.600,30.243,1.03,1.03,47.511,0.000,0.000,0.000,4.119
+1752494480.130037,5,USB_connected,WLC_disconnected,3.279,-192.600,30.243,1.17,1.17,47.511,0.000,0.000,0.000,4.156
+1752494481.2144902,5,USB_connected,WLC_disconnected,3.284,-192.825,30.243,1.30,1.30,48.303,0.000,0.000,0.000,4.131
