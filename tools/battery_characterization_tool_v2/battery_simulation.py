@@ -182,7 +182,6 @@ def run_simulation(dataset: BatteryDataset, battery_model: BatteryModel):
         P_init=0.1,
     )
 
-
     console.info(
         f"EKF estimator 2 [R={ekf_est2.R}, Q={ekf_est2.Q}, "
         f"Q_agressive={ekf_est2.Q_agressive}, R_agressive={ekf_est2.R_agressive},"
@@ -206,19 +205,19 @@ def run_simulation(dataset: BatteryDataset, battery_model: BatteryModel):
         ekf_result = run_battery_simulation(data, ekf_est)
         ekf2_result = run_battery_simulation(data, ekf_est2)
 
-        #fig = generate_sim_res_fig(
-        #    waveform, sim_name, cc_result, dm_result, ekf_result, ekf2_result
-        #)
+        fig = generate_sim_res_fig(
+            waveform, sim_name, cc_result, dm_result, ekf_result, ekf2_result
+        )
 
-        ## Save as pickle format for reopening in Python
-        #with open(f"{pickle_dir / sim_name}.pkl", "wb") as f:
-        #    pickle.dump(fig, f)
+        # Save as pickle format for reopening in Python
+        with open(f"{pickle_dir / sim_name}.pkl", "wb") as f:
+            pickle.dump(fig, f)
 
-        ## Also save as PNG for viewing
-        #fig.savefig(f"{output_dir / sim_name}.png", dpi=300, bbox_inches="tight")
+        # Also save as PNG for viewing
+        fig.savefig(f"{output_dir / sim_name}.png", dpi=300, bbox_inches="tight")
 
-        ## Close figure to free memory
-        #plt.close(fig)
+        # Close figure to free memory
+        plt.close(fig)
 
         # Progress indicator
         console.progress(
