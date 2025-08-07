@@ -1,29 +1,27 @@
 #!/usr/bin/env python3
 
-from pathlib import Path
-import numpy as np
-import tomllib
-import sys
 import argparse
+import sys
+import tomllib
+from pathlib import Path
+
 import matplotlib.pyplot as plt
-
+import numpy as np
 from dataset.battery_dataset import BatteryDataset
-from dataset.battery_profile import cut_charging_phase, cut_discharging_phase, get_mean_temp
-
+from dataset.battery_profile import (
+    cut_charging_phase,
+    cut_discharging_phase,
+    get_mean_temp,
+)
+from models.battery_model import BatteryModel, save_battery_model_to_json
 from models.identification import (
-    identify_r_int,
-    identify_ocv_curve,
+    estimate_ocv_curve,
+    estimate_r_int,
     fit_ocv_curve,
     fit_r_int_curve,
-    estimate_r_int,
-    estimate_ocv_curve,
+    identify_ocv_curve,
+    identify_r_int,
 )
-
-from models.battery_model import (
-    BatteryModel,
-    save_battery_model_to_json,
-)
-
 from utils.c_lib_generator import generate_battery_libraries
 from utils.console_formatter import ConsoleFormatter
 
@@ -34,6 +32,7 @@ BATTERY_MODEL_CONFIG_FILE_DIR = Path(__file__).parent / "models" / "battery_mode
 DEFAULT_MAX_CHARGE_VOLTAGE = 3.9
 DEFAULT_MAX_DISCHARGE_VOLTAGE = 3.0
 DEFAULT_OCV_SAMPLES = 100
+
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -62,12 +61,15 @@ def parse_arguments():
 
     return parser.parse_args()
 
+
 def prompt_for_config_file():
     config_dir = BATTERY_MODEL_CONFIG_FILE_DIR
     toml_files = list(config_dir.glob("*.toml"))
 
     if not toml_files:
-        console.error(f"No battery .toml config files found in '{BATTERY_MODEL_CONFIG_FILE_DIR}'")
+        console.error(
+            f"No battery .toml config files found in '{BATTERY_MODEL_CONFIG_FILE_DIR}'"
+        )
         sys.exit(1)
 
     console.info(f"Available config files in '{BATTERY_MODEL_CONFIG_FILE_DIR}':")
@@ -122,12 +124,14 @@ def load_config(toml_path):
         temperatures_to_process,
     )
 
+
 def create_battery_dataset(dataset_path) -> BatteryDataset:
 
     battery_dataset = BatteryDataset(dataset_path, load_data=True)
     battery_dataset.print_structure(max_depth=3)
 
     return battery_dataset
+
 
 def run_r_int_identification(dataset, debug=False):
     """Takes all switching discharge profiles from the dataset and for every profile estimates the internal
@@ -136,12 +140,14 @@ def run_r_int_identification(dataset, debug=False):
     console.subsection("Internal Resistance (R_int) Identification")
 
     r_int_points = []
-    profiles = list(dataset.get_data_list(
-        battery_ids=None,
-        temperatures=None,
-        battery_modes=["switching"],
-        mode_phases=["discharging"],
-    ))
+    profiles = list(
+        dataset.get_data_list(
+            battery_ids=None,
+            temperatures=None,
+            battery_modes=["switching"],
+            mode_phases=["discharging"],
+        )
+    )
 
     total_profiles = len(profiles)
     console.info(f"Found {total_profiles} switching discharge profiles to process")
@@ -154,7 +160,7 @@ def run_r_int_identification(dataset, debug=False):
         console.progress(
             f"Processing: {ld_profile['battery_id']}.{ld_profile['timestamp_id']}.{ld_profile['temperature']}°C",
             step=idx,
-            total=total_profiles
+            total=total_profiles,
         )
 
         # Estimate internal resistance on the switching discharge profile
@@ -181,6 +187,7 @@ def run_r_int_identification(dataset, debug=False):
 
     return r_int_rf_params
 
+
 def run_ocv_identification(dataset, r_int_rf_params, charging=False, debug=False):
     """Takes all linear discharge profiles from the dataset and for every profile extracts the open-circuit voltage"""
     mode_name = "Charging" if charging else "Discharging"
@@ -189,22 +196,26 @@ def run_ocv_identification(dataset, r_int_rf_params, charging=False, debug=False
     ocv_ident_data = {}
 
     # Get all linear discharge/charge profiles from the dataset across all batteries and temperatures
-    profiles = list(dataset.get_data_list(
-        battery_ids=None,
-        temperatures=None,
-        battery_modes=["linear"],
-        mode_phases=["discharging"] if not charging else ["charging"],
-    ))
+    profiles = list(
+        dataset.get_data_list(
+            battery_ids=None,
+            temperatures=None,
+            battery_modes=["linear"],
+            mode_phases=["discharging"] if not charging else ["charging"],
+        )
+    )
 
     total_profiles = len(profiles)
-    console.info(f"Found {total_profiles} linear {mode_name.lower()} profiles to process")
+    console.info(
+        f"Found {total_profiles} linear {mode_name.lower()} profiles to process"
+    )
 
     for idx, ld_profile in enumerate(profiles, 1):
         # Progress indicator
         console.progress(
             f"{ld_profile['battery_id']}.{ld_profile['timestamp_id']}.{ld_profile['temperature']}°C",
             step=idx,
-            total=total_profiles
+            total=total_profiles,
         )
 
         # Some of the dataset contain tails from relaxation phase, cut them off`
@@ -333,18 +344,36 @@ def extract_soc_and_rint_curves(
             "effective_capacity_chg": chg_ef_cap,
         }
 
-    if(True):
+    if True:
 
-        fig, ax = plt.subplots(2,1)
+        fig, ax = plt.subplots(2, 1)
         for ocv_curve in ocv_curves.values():
 
-            soc_axis = np.linspace(0,1,100)
+            soc_axis = np.linspace(0, 1, 100)
 
-            ax[0].plot(soc_axis, estimate_ocv_curve(soc_axis, ocv_curve["ocv_dischg_nc"]), label=f"Discharge {ocv_curve['bat_temp_dischg']}°C")
-            ax[0].plot(soc_axis, estimate_ocv_curve(soc_axis, ocv_curve["ocv_chg_nc"]), label=f"Charge {ocv_curve['bat_temp_chg']}°C")
+            ax[0].plot(
+                soc_axis,
+                estimate_ocv_curve(soc_axis, ocv_curve["ocv_dischg_nc"]),
+                label=f"Discharge {ocv_curve['bat_temp_dischg']}°C",
+            )
+            ax[0].plot(
+                soc_axis,
+                estimate_ocv_curve(soc_axis, ocv_curve["ocv_chg_nc"]),
+                label=f"Charge {ocv_curve['bat_temp_chg']}°C",
+            )
 
-            ax[1].plot(ocv_curve["bat_temp_dischg"], ocv_curve["total_capacity_dischg"], 'o', label=f"Total Capacity Discharge {ocv_curve['bat_temp_dischg']}°C")
-            ax[1].plot(ocv_curve["bat_temp_chg"], ocv_curve["total_capacity_chg"], 'o', label=f"Total Capacity Charge {ocv_curve['bat_temp_chg']}°C")
+            ax[1].plot(
+                ocv_curve["bat_temp_dischg"],
+                ocv_curve["total_capacity_dischg"],
+                "o",
+                label=f"Total Capacity Discharge {ocv_curve['bat_temp_dischg']}°C",
+            )
+            ax[1].plot(
+                ocv_curve["bat_temp_chg"],
+                ocv_curve["total_capacity_chg"],
+                "o",
+                label=f"Total Capacity Charge {ocv_curve['bat_temp_chg']}°C",
+            )
 
         ax[0].set_title("OCV Curves")
         ax[0].set_xlabel("SoC")
@@ -359,13 +388,14 @@ def extract_soc_and_rint_curves(
 
     return ocv_curves, r_int_rf_params
 
+
 def main():
 
     # Print header
     console.header(
         "BATTERY CHARACTERIZATION TOOL",
         "Advanced Battery Model Identification and Analysis",
-        width=85
+        width=85,
     )
 
     # Parse command line arguments
@@ -402,7 +432,7 @@ def main():
         "Manufacturer": battery_manufacturer,
         "Temperatures": f"{temperatures_to_process}°C",
         "Output Directory": args.output_dir,
-        "Debug Mode": "Enabled" if args.debug else "Disabled"
+        "Debug Mode": "Enabled" if args.debug else "Disabled",
     }
 
     console.key_value_pairs(config_data, "Configuration Summary")
@@ -418,13 +448,11 @@ def main():
     console.section("BATTERY MODEL IDENTIFICATION")
     console.info("Starting battery characterization analysis...")
 
-    ocv_curves, r_int_rf_params = (
-        extract_soc_and_rint_curves(
-            dataset,
-            filter_batteries=batteries_to_process,
-            characterized_temperatures_deg=temperatures_to_process,
-            debug=args.debug,
-        )
+    ocv_curves, r_int_rf_params = extract_soc_and_rint_curves(
+        dataset,
+        filter_batteries=batteries_to_process,
+        characterized_temperatures_deg=temperatures_to_process,
+        debug=args.debug,
     )
 
     console.success("Battery model identification completed")
@@ -436,12 +464,14 @@ def main():
 
     rows = []
     for temp, data in sorted(ocv_curves.items(), key=lambda x: x[0]):
-        rows.append([
-            f"{temp}°C",
-            f"{data['total_capacity_dischg']*1000:.2f} mAh",
-            f"{data['total_capacity_chg']*1000:.2f} mAh",
-            f"{estimate_r_int(float(temp), r_int_rf_params)*1000:.2f} mΩ"
-        ])
+        rows.append(
+            [
+                f"{temp}°C",
+                f"{data['total_capacity_dischg']*1000:.2f} mAh",
+                f"{data['total_capacity_chg']*1000:.2f} mAh",
+                f"{estimate_r_int(float(temp), r_int_rf_params)*1000:.2f} mΩ",
+            ]
+        )
 
     console.table(headers, rows, title="Battery Model Analysis Results")
 
@@ -480,6 +510,7 @@ def main():
     if args.debug:
         # Show the plots if in debug mode
         plt.show()
+
 
 if __name__ == "__main__":
     main()

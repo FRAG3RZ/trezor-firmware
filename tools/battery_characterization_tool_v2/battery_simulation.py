@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
 
-from pathlib import Path
-import numpy as np
 import pickle
+from pathlib import Path
+
 import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
-from utils.console_formatter import ConsoleFormatter
-from InquirerPy import inquirer
-from InquirerPy.base import Choice
+import numpy as np
 from dataset.battery_dataset import BatteryDataset
 from dataset.battery_profile import time_to_minutes
-from models.battery_model import BatteryModel
-
-from models.battery_model import (
-    load_battery_model_from_hash,
-)
+from InquirerPy import inquirer
+from InquirerPy.base import Choice
+from matplotlib.figure import Figure
+from models.battery_model import BatteryModel, load_battery_model_from_hash
+from models.estimators import CoulombCounterEstimator, DummyEstimator, EkfEstimator
 from models.simulator import run_battery_simulation
-from models.estimators import CoulombCounterEstimator
-from models.estimators import DummyEstimator
-from models.estimators import EkfEstimator
+from utils.console_formatter import ConsoleFormatter
 
 DEBUG = False
 BATTERY_MODEL_JSON_PATH = Path("exported_data/battery_models/")
@@ -29,8 +24,9 @@ SIMULATION_MODES = ["charging", "discharging", "random_wonder"]
 # Global console formatter instance
 console = ConsoleFormatter()
 
+
 def prompt_for_dataset() -> BatteryDataset:
-    """ Promt user to select a dataset from a DATASET_DIRECTORY and load it
+    """Promt user to select a dataset from a DATASET_DIRECTORY and load it
         into a BatteryDataset object.
     Returns:
         BatteryDataset: The selected dataset object.
@@ -57,8 +53,9 @@ def prompt_for_dataset() -> BatteryDataset:
 
     return battery_dataset
 
+
 def prompt_for_battery_model() -> BatteryModel:
-    """ Prompt user to select a battery model from BATTERY_MODEL_JSON_PATH
+    """Prompt user to select a battery model from BATTERY_MODEL_JSON_PATH
         and load it into a BatteryModel object.
     Returns:
         BatteryModel: The selected battery model object.
@@ -88,8 +85,9 @@ def prompt_for_battery_model() -> BatteryModel:
 
     return battery_model
 
+
 def generate_sim_res_fig(waveform, sim_name, *sim_results) -> Figure:
-    """ Generate a figure with the simulation results.
+    """Generate a figure with the simulation results.
     Args:
         waveform: The waveform data used for the simulation.
         *sim_results: Variable number of simulation results to plot.
@@ -97,7 +95,7 @@ def generate_sim_res_fig(waveform, sim_name, *sim_results) -> Figure:
         matplotlib.figure.Figure: The generated figure with simulation results.
     """
 
-    wd = waveform['data']
+    wd = waveform["data"]
 
     fig, ax = plt.subplots(4, 1)
     fig.set_size_inches(10, 10)
@@ -117,8 +115,8 @@ def generate_sim_res_fig(waveform, sim_name, *sim_results) -> Figure:
 
     for sr in sim_results:
         ax[2].plot(
-            time_to_minutes(sr.time[sr.start_idx:sr.end_idx]),
-            sr.soc[sr.start_idx:sr.end_idx],
+            time_to_minutes(sr.time[sr.start_idx : sr.end_idx]),
+            sr.soc[sr.start_idx : sr.end_idx],
             label=sr.model_name,
         )
     ax[2].set_title("Estimated SoC")
@@ -137,6 +135,7 @@ def generate_sim_res_fig(waveform, sim_name, *sim_results) -> Figure:
     ax[3].set_xlim((0, time_to_minutes(wd.time[-1], wd.time[0])))
 
     return fig
+
 
 def run_simulation(dataset: BatteryDataset, battery_model: BatteryModel):
 
@@ -168,9 +167,11 @@ def run_simulation(dataset: BatteryDataset, battery_model: BatteryModel):
         R_agressive=1000,
         P_init=0.1,
     )
-    console.info(f"EKF estimator [R={ekf_est.R}, Q={ekf_est.Q}, "
-                 f"Q_agressive={ekf_est.Q_agressive}, R_agressive={ekf_est.R_agressive}, "
-                 f"P_init={ekf_est.P_init}]")
+    console.info(
+        f"EKF estimator [R={ekf_est.R}, Q={ekf_est.Q}, "
+        f"Q_agressive={ekf_est.Q_agressive}, R_agressive={ekf_est.R_agressive}, "
+        f"P_init={ekf_est.P_init}]"
+    )
 
     ekf_est2 = EkfEstimator(
         battery_model=battery_model,
@@ -181,9 +182,12 @@ def run_simulation(dataset: BatteryDataset, battery_model: BatteryModel):
         P_init=0.1,
     )
 
-    console.info(f"EKF estimator 2 [R={ekf_est2.R}, Q={ekf_est2.Q}, "
-                 f"Q_agressive={ekf_est2.Q_agressive}, R_agressive={ekf_est2.R_agressive},"
-                 f"P_init={ekf_est2.P_init}]")
+
+    console.info(
+        f"EKF estimator 2 [R={ekf_est2.R}, Q={ekf_est2.Q}, "
+        f"Q_agressive={ekf_est2.Q_agressive}, R_agressive={ekf_est2.R_agressive},"
+        f"P_init={ekf_est2.P_init}]"
+    )
 
     console.subsection("Running simulations")
 
@@ -191,35 +195,40 @@ def run_simulation(dataset: BatteryDataset, battery_model: BatteryModel):
     for idx, waveform in enumerate(simulation_data):
 
         data = waveform["data"]
-        sim_name = f"{waveform['battery_id']}.{waveform['timestamp_id']}." \
-                   f"{waveform['battery_mode']}.{waveform['mode_phase']}." \
-                   f"{waveform['temperature']}"
+        sim_name = (
+            f"{waveform['battery_id']}.{waveform['timestamp_id']}."
+            f"{waveform['battery_mode']}.{waveform['mode_phase']}."
+            f"{waveform['temperature']}"
+        )
 
         cc_result = run_battery_simulation(data, coulomb_counter_est)
         dm_result = run_battery_simulation(data, dummy_est)
         ekf_result = run_battery_simulation(data, ekf_est)
         ekf2_result = run_battery_simulation(data, ekf_est2)
 
-        fig = generate_sim_res_fig(waveform, sim_name, cc_result, dm_result, ekf_result, ekf2_result)
+        #fig = generate_sim_res_fig(
+        #    waveform, sim_name, cc_result, dm_result, ekf_result, ekf2_result
+        #)
 
-        # Save as pickle format for reopening in Python
-        with open(f"{pickle_dir / sim_name}.pkl", 'wb') as f:
-            pickle.dump(fig, f)
+        ## Save as pickle format for reopening in Python
+        #with open(f"{pickle_dir / sim_name}.pkl", "wb") as f:
+        #    pickle.dump(fig, f)
 
-        # Also save as PNG for viewing
-        fig.savefig(f"{output_dir / sim_name}.png", dpi=300, bbox_inches='tight')
+        ## Also save as PNG for viewing
+        #fig.savefig(f"{output_dir / sim_name}.png", dpi=300, bbox_inches="tight")
 
-        # Close figure to free memory
-        plt.close(fig)
+        ## Close figure to free memory
+        #plt.close(fig)
 
         # Progress indicator
         console.progress(
             f" Simulation: {waveform['battery_id']}.{waveform['timestamp_id']}.{waveform['temperature']}°C",
-            step=idx+1,
-            total=len(simulation_data)
+            step=idx + 1,
+            total=len(simulation_data),
         )
 
     console.success("Simulation completed.")
+
 
 def main():
 

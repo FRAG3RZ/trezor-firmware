@@ -5,7 +5,7 @@ Uses only standard Python libraries for clean, readable console output.
 
 import time
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 
 class ConsoleFormatter:
@@ -13,33 +13,33 @@ class ConsoleFormatter:
 
     # ANSI Color Codes
     class Colors:
-        RESET = '\033[0m'
-        BOLD = '\033[1m'
-        DIM = '\033[2m'
+        RESET = "\033[0m"
+        BOLD = "\033[1m"
+        DIM = "\033[2m"
 
         # Text Colors
-        BLACK = '\033[30m'
-        RED = '\033[31m'
-        GREEN = '\033[32m'
-        YELLOW = '\033[33m'
-        BLUE = '\033[34m'
-        MAGENTA = '\033[35m'
-        CYAN = '\033[36m'
-        WHITE = '\033[37m'
+        BLACK = "\033[30m"
+        RED = "\033[31m"
+        GREEN = "\033[32m"
+        YELLOW = "\033[33m"
+        BLUE = "\033[34m"
+        MAGENTA = "\033[35m"
+        CYAN = "\033[36m"
+        WHITE = "\033[37m"
 
         # Bright Colors
-        BRIGHT_RED = '\033[91m'
-        BRIGHT_GREEN = '\033[92m'
-        BRIGHT_YELLOW = '\033[93m'
-        BRIGHT_BLUE = '\033[94m'
-        BRIGHT_MAGENTA = '\033[95m'
-        BRIGHT_CYAN = '\033[96m'
+        BRIGHT_RED = "\033[91m"
+        BRIGHT_GREEN = "\033[92m"
+        BRIGHT_YELLOW = "\033[93m"
+        BRIGHT_BLUE = "\033[94m"
+        BRIGHT_MAGENTA = "\033[95m"
+        BRIGHT_CYAN = "\033[96m"
 
         # Background Colors
-        BG_RED = '\033[41m'
-        BG_GREEN = '\033[42m'
-        BG_YELLOW = '\033[43m'
-        BG_BLUE = '\033[44m'
+        BG_RED = "\033[41m"
+        BG_GREEN = "\033[42m"
+        BG_YELLOW = "\033[43m"
+        BG_BLUE = "\033[44m"
 
     def __init__(self, use_colors: bool = True):
         self.use_colors = use_colors
@@ -115,7 +115,9 @@ class ConsoleFormatter:
         bar = "█" * filled + "░" * (width - filled)
         return bar
 
-    def table(self, headers: List[str], rows: List[List[str]], title: str = None) -> None:
+    def table(
+        self, headers: List[str], rows: List[List[str]], title: str = None
+    ) -> None:
         """Print a formatted table."""
         if title:
             self.subsection(title)
@@ -129,9 +131,13 @@ class ConsoleFormatter:
 
         # Print table
         def print_row(row_data, is_header=False):
-            row_str = "│ " + " │ ".join(
-                str(cell).ljust(col_widths[i]) for i, cell in enumerate(row_data)
-            ) + " │"
+            row_str = (
+                "│ "
+                + " │ ".join(
+                    str(cell).ljust(col_widths[i]) for i, cell in enumerate(row_data)
+                )
+                + " │"
+            )
             if is_header:
                 print(self._color(row_str, self.Colors.BOLD))
             else:
@@ -156,7 +162,9 @@ class ConsoleFormatter:
         bottom = "└─" + "─┴─".join("─" * width for width in col_widths) + "─┘"
         print(bottom)
 
-    def key_value_pairs(self, data: Dict[str, Any], title: str = None, indent: int = 0) -> None:
+    def key_value_pairs(
+        self, data: Dict[str, Any], title: str = None, indent: int = 0
+    ) -> None:
         """Print key-value pairs in a formatted way."""
         if title:
             self.subsection(title)
@@ -194,35 +202,46 @@ class ConsoleFormatter:
 # Convenience functions for quick use
 console = ConsoleFormatter()
 
+
 def header(title: str, subtitle: str = None, width: int = 80):
     console.header(title, subtitle, width)
+
 
 def section(title: str, width: int = 80):
     console.section(title, width)
 
+
 def subsection(title: str):
     console.subsection(title)
+
 
 def info(message: str, indent: int = 0):
     console.info(message, indent)
 
+
 def success(message: str, indent: int = 0):
     console.success(message, indent)
+
 
 def warning(message: str, indent: int = 0):
     console.warning(message, indent)
 
+
 def error(message: str, indent: int = 0):
     console.error(message, indent)
+
 
 def progress(message: str, step: int = None, total: int = None):
     console.progress(message, step, total)
 
+
 def table(headers: List[str], rows: List[List[str]], title: str = None):
     console.table(headers, rows, title)
 
+
 def key_value_pairs(data: Dict[str, Any], title: str = None, indent: int = 0):
     console.key_value_pairs(data, title, indent)
+
 
 def footer(width: int = 80):
     console.footer(width)

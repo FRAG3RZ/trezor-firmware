@@ -1,5 +1,4 @@
-
-class CoulombCounterEstimator():
+class CoulombCounterEstimator:
 
     def __init__(self, battery_model, label=None):
 
@@ -12,13 +11,11 @@ class CoulombCounterEstimator():
     def initial_guess(self, voltage_V, current_mA, temp_deg):
 
         discharge_mode = True
-        if(current_mA < 0):
+        if current_mA < 0:
             discharge_mode = False
 
         ocv = self.bm._meas_to_ocv(voltage_V, current_mA, temp_deg)
-        self.SoC = self.bm._interpolate_soc_at_temp(voltage_V,
-                                                    temp_deg,
-                                                    discharge_mode)
+        self.SoC = self.bm._interpolate_soc_at_temp(voltage_V, temp_deg, discharge_mode)
         return
 
     def reset(self):
@@ -30,31 +27,13 @@ class CoulombCounterEstimator():
     def update(self, dt, voltage_V, current_mA, temp_deg):
 
         discharge_mode = True
-        if(current_mA < 0):
+        if current_mA < 0:
             discharge_mode = False
 
-        self.SoC -= (current_mA
-                     /(3600*self.bm._total_capacity(temp_deg, discharge_mode)))*(dt/1000)
+        self.SoC -= (
+            current_mA / (3600 * self.bm._total_capacity(temp_deg, discharge_mode))
+        ) * (dt / 1000)
         self.SoC = min(1, max(0, self.SoC))
 
         # Return SoC, covariance not tracked
         return self.SoC, None
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

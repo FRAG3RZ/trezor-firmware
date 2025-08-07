@@ -11,11 +11,13 @@ Usage:
     python generate_battery_libraries.py --output-dir=<directory> [--battery-name=<name>]
 """
 
-import os
 import argparse
 import json
-import numpy as np
+import os
 from pathlib import Path
+
+import numpy as np
+
 
 def generate_battery_data_header(battery_model_data, battery_name, output_path):
     """
@@ -30,14 +32,14 @@ def generate_battery_data_header(battery_model_data, battery_name, output_path):
 
     # Extract temperature points from the battery model data
     # Get separate temperature arrays for charging and discharging
-    temp_keys = sorted(list(battery_model_data['ocv_curves'].keys()))
+    temp_keys = sorted(list(battery_model_data["ocv_curves"].keys()))
     temp_points_dischg = []
     temp_points_chg = []
     for key in temp_keys:
-        temp_data = battery_model_data['ocv_curves'][key]
-        temp_points_dischg.append(temp_data['bat_temp_dischg'])
-        temp_points_chg.append(temp_data['bat_temp_chg'])
-    
+        temp_data = battery_model_data["ocv_curves"][key]
+        temp_points_dischg.append(temp_data["bat_temp_dischg"])
+        temp_points_chg.append(temp_data["bat_temp_chg"])
+
     # Sort both temperature arrays
     temp_points_dischg = sorted(temp_points_dischg)
     temp_points_chg = sorted(temp_points_chg)
@@ -78,58 +80,80 @@ def generate_battery_data_header(battery_model_data, battery_name, output_path):
     header.append(", ".join(temp_strings_dischg))
     header.append("};")
     header.append("")
-    
-    # Add charge temperature points  
+
+    # Add charge temperature points
     header.append("// Charge temperatures")
-    header.append(f"static const float BATTERY_TEMP_POINTS_CHG[BATTERY_NUM_TEMP_POINTS] = {{")
+    header.append(
+        f"static const float BATTERY_TEMP_POINTS_CHG[BATTERY_NUM_TEMP_POINTS] = {{"
+    )
     temp_strings_chg = [f"    {temp:.2f}f" for temp in temp_points_chg]
     header.append(", ".join(temp_strings_chg))
     header.append("};")
     header.append("")
 
     # Add internal resistance parameters
-    header.append("// Internal resistance curve parameters (rational function parameters a+b*t)/(c+d*t)")
+    header.append(
+        "// Internal resistance curve parameters (rational function parameters a+b*t)/(c+d*t)"
+    )
     header.append("static const float BATTERY_R_INT_PARAMS[4] = {")
-    r_int_params = battery_model_data['r_int']
+    r_int_params = battery_model_data["r_int"]
     header.append(f"    // a, b, c, d for rational function (a + b*t)/(c + d*t)")
-    header.append(f"    {r_int_params[0]:.6f}f, {r_int_params[1]:.6f}f, {r_int_params[2]:.6f}f, {r_int_params[3]:.6f}f")
+    header.append(
+        f"    {r_int_params[0]:.6f}f, {r_int_params[1]:.6f}f, {r_int_params[2]:.6f}f, {r_int_params[3]:.6f}f"
+    )
     header.append("};")
     header.append("")
 
     # Add discharge OCV curve parameters for each temperature
     header.append("// Discharge OCV curve parameters for each temperature")
-    header.append("static const float BATTERY_OCV_DISCHARGE_PARAMS[BATTERY_NUM_TEMP_POINTS][10] = {")
+    header.append(
+        "static const float BATTERY_OCV_DISCHARGE_PARAMS[BATTERY_NUM_TEMP_POINTS][10] = {"
+    )
 
     for temp_idx, temp_key in enumerate(temp_keys):
-        ocv_data = battery_model_data['ocv_curves'][temp_key]
-        ocv_params = ocv_data['ocv_dischg']  # Updated key name
-        actual_temp = ocv_data['bat_temp_dischg']
+        ocv_data = battery_model_data["ocv_curves"][temp_key]
+        ocv_params = ocv_data["ocv_dischg"]  # Updated key name
+        actual_temp = ocv_data["bat_temp_dischg"]
 
         header.append(f"    // Temperature: {actual_temp:.2f}°C (key: {temp_key})")
         header.append("    {")
-        header.append(f"        {ocv_params[0]:.6f}f, {ocv_params[1]:.6f}f, // m, b (linear segment)")
-        header.append(f"        {ocv_params[2]:.6f}f, {ocv_params[3]:.6f}f, {ocv_params[4]:.6f}f, {ocv_params[5]:.6f}f, // a1, b1, c1, d1 (first rational segment)")
-        header.append(f"        {ocv_params[6]:.6f}f, {ocv_params[7]:.6f}f, {ocv_params[8]:.6f}f, {ocv_params[9]:.6f}f  // a3, b3, c3, d3 (third rational segment)")
-        header.append("    }" + ("," if temp_idx < len(temp_keys)-1 else ""))
+        header.append(
+            f"        {ocv_params[0]:.6f}f, {ocv_params[1]:.6f}f, // m, b (linear segment)"
+        )
+        header.append(
+            f"        {ocv_params[2]:.6f}f, {ocv_params[3]:.6f}f, {ocv_params[4]:.6f}f, {ocv_params[5]:.6f}f, // a1, b1, c1, d1 (first rational segment)"
+        )
+        header.append(
+            f"        {ocv_params[6]:.6f}f, {ocv_params[7]:.6f}f, {ocv_params[8]:.6f}f, {ocv_params[9]:.6f}f  // a3, b3, c3, d3 (third rational segment)"
+        )
+        header.append("    }" + ("," if temp_idx < len(temp_keys) - 1 else ""))
 
     header.append("};")
     header.append("")
 
     # Add charge OCV curve parameters for each temperature
     header.append("// Charge OCV curve parameters for each temperature")
-    header.append("static const float BATTERY_OCV_CHARGE_PARAMS[BATTERY_NUM_TEMP_POINTS][10] = {")
+    header.append(
+        "static const float BATTERY_OCV_CHARGE_PARAMS[BATTERY_NUM_TEMP_POINTS][10] = {"
+    )
 
     for temp_idx, temp_key in enumerate(temp_keys):
-        ocv_data = battery_model_data['ocv_curves'][temp_key]
-        ocv_params = ocv_data['ocv_chg']  # Updated key name
-        actual_temp = ocv_data['bat_temp_chg']
+        ocv_data = battery_model_data["ocv_curves"][temp_key]
+        ocv_params = ocv_data["ocv_chg"]  # Updated key name
+        actual_temp = ocv_data["bat_temp_chg"]
 
         header.append(f"    // Temperature: {actual_temp:.2f}°C (key: {temp_key})")
         header.append("    {")
-        header.append(f"        {ocv_params[0]:.6f}f, {ocv_params[1]:.6f}f, // m, b (linear segment)")
-        header.append(f"        {ocv_params[2]:.6f}f, {ocv_params[3]:.6f}f, {ocv_params[4]:.6f}f, {ocv_params[5]:.6f}f, // a1, b1, c1, d1 (first rational segment)")
-        header.append(f"        {ocv_params[6]:.6f}f, {ocv_params[7]:.6f}f, {ocv_params[8]:.6f}f, {ocv_params[9]:.6f}f  // a3, b3, c3, d3 (third rational segment)")
-        header.append("    }" + ("," if temp_idx < len(temp_keys)-1 else ""))
+        header.append(
+            f"        {ocv_params[0]:.6f}f, {ocv_params[1]:.6f}f, // m, b (linear segment)"
+        )
+        header.append(
+            f"        {ocv_params[2]:.6f}f, {ocv_params[3]:.6f}f, {ocv_params[4]:.6f}f, {ocv_params[5]:.6f}f, // a1, b1, c1, d1 (first rational segment)"
+        )
+        header.append(
+            f"        {ocv_params[6]:.6f}f, {ocv_params[7]:.6f}f, {ocv_params[8]:.6f}f, {ocv_params[9]:.6f}f  // a3, b3, c3, d3 (third rational segment)"
+        )
+        header.append("    }" + ("," if temp_idx < len(temp_keys) - 1 else ""))
 
     header.append("};")
     header.append("")
@@ -139,23 +163,27 @@ def generate_battery_data_header(battery_model_data, battery_name, output_path):
     header.append("static const float BATTERY_CAPACITY[BATTERY_NUM_TEMP_POINTS][2] = {")
 
     for temp_idx, temp_key in enumerate(temp_keys):
-        ocv_data = battery_model_data['ocv_curves'][temp_key]
-        discharge_capacity = ocv_data['total_capacity_dischg']  # Updated key name
-        charge_capacity = ocv_data['total_capacity_chg']  # Updated key name
-        actual_temp = ocv_data['bat_temp_dischg']
+        ocv_data = battery_model_data["ocv_curves"][temp_key]
+        discharge_capacity = ocv_data["total_capacity_dischg"]  # Updated key name
+        charge_capacity = ocv_data["total_capacity_chg"]  # Updated key name
+        actual_temp = ocv_data["bat_temp_dischg"]
 
         header.append(f"    // Temperature: {actual_temp:.2f}°C (key: {temp_key})")
-        header.append(f"    {{ {discharge_capacity:.2f}f, {charge_capacity:.2f}f }}" + ("," if temp_idx < len(temp_keys)-1 else ""))
+        header.append(
+            f"    {{ {discharge_capacity:.2f}f, {charge_capacity:.2f}f }}"
+            + ("," if temp_idx < len(temp_keys) - 1 else "")
+        )
 
     header.append("};")
     header.append("")
     header.append(f"#endif // {header_guard}")
 
     # Write the header to file
-    with open(output_path, 'w') as f:
-        f.write('\n'.join(header))
+    with open(output_path, "w") as f:
+        f.write("\n".join(header))
 
     print(f"Battery data header file generated: {output_path}")
+
 
 def generate_battery_model_header(output_path):
     """
@@ -180,7 +208,7 @@ def generate_battery_model_header(output_path):
         "",
         "// Include the battery data header - this will be selected at compile time",
         "// based on which battery is being used",
-        "#include \"battery_data.h\"",
+        '#include "battery_data.h"',
         "",
         "/**",
         " * Calculate internal resistance at the given temperature",
@@ -233,14 +261,15 @@ def generate_battery_model_header(output_path):
         " */",
         "float battery_soc(float ocv, float temperature, bool discharging_mode);",
         "",
-        f"#endif // {header_guard}"
+        f"#endif // {header_guard}",
     ]
 
     # Write the header to file
-    with open(output_path, 'w') as f:
-        f.write('\n'.join(header))
+    with open(output_path, "w") as f:
+        f.write("\n".join(header))
 
     print(f"Battery model header file generated: {output_path}")
+
 
 def generate_battery_model_implementation(output_path):
     """
@@ -255,7 +284,7 @@ def generate_battery_model_implementation(output_path):
         " * Auto-generated from BatteryModel Python class",
         " */",
         "",
-        "#include \"battery_model.h\"",
+        '#include "battery_model.h"',
         "#include <math.h>",
         "",
         "// Helper function for linear interpolation",
@@ -538,14 +567,15 @@ def generate_battery_model_implementation(output_path):
         "                        BATTERY_OCV_DISCHARGE_PARAMS[0] : ",
         "                        BATTERY_OCV_CHARGE_PARAMS[0];",
         "    return calc_soc_from_ocv(params, ocv);",
-        "}"
+        "}",
     ]
 
     # Write the implementation to file
-    with open(output_path, 'w') as f:
-        f.write('\n'.join(impl))
+    with open(output_path, "w") as f:
+        f.write("\n".join(impl))
 
     print(f"Battery model implementation file generated: {output_path}")
+
 
 def generate_ekf_header(output_path):
     """
@@ -628,14 +658,15 @@ def generate_ekf_header(output_path):
         "float battery_ekf_update(battery_ekf_state_t* state, uint32_t dt,",
         "                         float voltage_V, float current_mA, float temperature);",
         "",
-        f"#endif // {header_guard}"
+        f"#endif // {header_guard}",
     ]
 
     # Write the header to file
-    with open(output_path, 'w') as f:
-        f.write('\n'.join(header))
+    with open(output_path, "w") as f:
+        f.write("\n".join(header))
 
     print(f"EKF header file generated: {output_path}")
+
 
 def generate_ekf_implementation(output_path):
     """
@@ -650,8 +681,8 @@ def generate_ekf_implementation(output_path):
         " * Auto-generated from EkfEstimator Python class",
         " */",
         "",
-        "#include \"battery_ekf.h\"",
-        "#include \"battery_model.h\"",
+        '#include "battery_ekf.h"',
+        '#include "battery_model.h"',
         "#include <math.h>",
         "",
         "// Filter window size for measurements",
@@ -800,14 +831,15 @@ def generate_ekf_implementation(output_path):
         "    }",
         "    ",
         "    return state->soc_latched;",
-        "}"
+        "}",
     ]
 
     # Write the implementation to file
-    with open(output_path, 'w') as f:
-        f.write('\n'.join(impl))
+    with open(output_path, "w") as f:
+        f.write("\n".join(impl))
 
     print(f"EKF implementation file generated: {output_path}")
+
 
 def generate_battery_data_symlink(battery_name, output_dir):
     """
@@ -821,9 +853,10 @@ def generate_battery_data_symlink(battery_name, output_dir):
     dst = os.path.join(output_dir, "battery_data.h")
 
     # Create symbolic link (or copy file for Windows compatibility)
-    if os.name == 'nt':  # Windows
+    if os.name == "nt":  # Windows
         # Windows symlinks require admin privileges, so just copy the file
         import shutil
+
         shutil.copy2(os.path.join(output_dir, src), dst)
         print(f"Copied {src} to {dst}")
     else:  # Unix/Linux/Mac
@@ -838,7 +871,10 @@ def generate_battery_data_symlink(battery_name, output_dir):
             print(f"Error creating symlink: {e}")
             print(f"You may need to manually create a link/copy from {src} to {dst}")
 
-def generate_battery_libraries(battery_model_data, output_dir=".", battery_name="default"):
+
+def generate_battery_libraries(
+    battery_model_data, output_dir=".", battery_name="default"
+):
     """
     Generate all battery-related libraries
 
@@ -869,6 +905,7 @@ def generate_battery_libraries(battery_model_data, output_dir=".", battery_name=
 
     print(f"All battery libraries generated in {output_dir}")
 
+
 def generate_battery_readme(output_dir, battery_name):
     """Generate a README file explaining how to use the battery libraries"""
     readme_content = [
@@ -887,8 +924,8 @@ def generate_battery_readme(output_dir, battery_name):
         "",
         "1. Include the necessary headers in your application:",
         "   ```c",
-        "   #include \"battery_model.h\"",
-        "   #include \"battery_ekf.h\"",
+        '   #include "battery_model.h"',
+        '   #include "battery_ekf.h"',
         "   ```",
         "",
         "2. Initialize the EKF state:",
@@ -925,15 +962,24 @@ def generate_battery_readme(output_dir, battery_name):
     ]
 
     # Write README.md
-    with open(os.path.join(output_dir, "README.md"), 'w') as f:
-        f.write('\n'.join(readme_content))
+    with open(os.path.join(output_dir, "README.md"), "w") as f:
+        f.write("\n".join(readme_content))
 
     print(f"README file generated in {output_dir}")
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Generate battery model and EKF libraries')
-    parser.add_argument('--output-dir', default='generated_output', help='Output directory for generated files')
-    parser.add_argument('--battery-name', default='lifepo4', help='Battery name identifier')
+    parser = argparse.ArgumentParser(
+        description="Generate battery model and EKF libraries"
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="generated_output",
+        help="Output directory for generated files",
+    )
+    parser.add_argument(
+        "--battery-name", default="lifepo4", help="Battery name identifier"
+    )
 
     args = parser.parse_args()
 
@@ -941,7 +987,12 @@ if __name__ == "__main__":
     try:
         # Import battery_model_data from main script if available
         from archive.run_battery_characterization import battery_model_data
-        generate_battery_libraries(battery_model_data, args.output_dir, args.battery_name)
+
+        generate_battery_libraries(
+            battery_model_data, args.output_dir, args.battery_name
+        )
         generate_battery_readme(args.output_dir, args.battery_name)
     except (ImportError, AttributeError):
-        print("No battery_model_data found. Please run this script after battery characterization.")
+        print(
+            "No battery_model_data found. Please run this script after battery characterization."
+        )

@@ -1,12 +1,9 @@
+class DummyEstimator:
 
-class DummyEstimator():
-
-    def __init__(self,
-                 battery_model,
-                 label=None):
+    def __init__(self, battery_model, label=None):
 
         # Batery model consis of characterized battery data
-        self.name="Dummy Estimator"
+        self.name = "Dummy Estimator"
         if label is not None:
             self.name = self.name + ": " + label
         self.bm = battery_model
@@ -15,9 +12,8 @@ class DummyEstimator():
     def reset(self):
 
         # Reset default state
-        self.x = 0 # SoC
+        self.x = 0  # SoC
         self.x_latched = self.x
-
 
     def initial_guess(self, voltage_V, current_mA, temp_deg):
         """
@@ -26,7 +22,7 @@ class DummyEstimator():
         """
 
         discharge_mode = True
-        if(current_mA < 0):
+        if current_mA < 0:
             discharge_mode = False
 
         ocv = self.bm._meas_to_ocv(voltage_V, current_mA, temp_deg)
@@ -38,7 +34,7 @@ class DummyEstimator():
     def update(self, dt, voltage_V, current_mA, temp_deg):
 
         discharge_mode = True
-        if(current_mA < 0):
+        if current_mA < 0:
             discharge_mode = False
 
         ocv = self.bm._meas_to_ocv(voltage_V, current_mA, temp_deg)
