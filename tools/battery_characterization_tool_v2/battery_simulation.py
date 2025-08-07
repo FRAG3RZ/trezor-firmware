@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from pathlib import Path
 import numpy as np
 import pickle
@@ -8,22 +10,21 @@ from InquirerPy import inquirer
 from InquirerPy.base import Choice
 from dataset.battery_dataset import BatteryDataset
 from dataset.battery_profile import time_to_minutes
-from fuel_gauge.battery_model import BatteryModel
+from models.battery_model import BatteryModel
 
-from fuel_gauge.battery_model import (
+from models.battery_model import (
     load_battery_model_from_hash,
 )
-from fuel_gauge.simulator import run_battery_simulation
-from fuel_gauge.coulomb_counter_estimator import CoulombCounterEstimator
-from fuel_gauge.dummy_estimator import DummyEstimator
-from fuel_gauge.ekf_estimator import EkfEstimator
+from models.simulator import run_battery_simulation
+from models.estimators import CoulombCounterEstimator
+from models.estimators import DummyEstimator
+from models.estimators import EkfEstimator
 
 DEBUG = False
 BATTERY_MODEL_JSON_PATH = Path("exported_data/battery_models/")
 DATASET_DIRECTORY = Path("dataset/datasets")
 OUTPUT_DIRECTORY = Path("exported_data/simulation_results/")
 SIMULATION_MODES = ["charging", "discharging", "random_wonder"]
-
 
 # Global console formatter instance
 console = ConsoleFormatter()
@@ -218,6 +219,8 @@ def run_simulation(dataset: BatteryDataset, battery_model: BatteryModel):
             total=len(simulation_data)
         )
 
+    console.success("Simulation completed.")
+
 def main():
 
     # Load simulation dataset
@@ -229,6 +232,7 @@ def main():
 
     run_simulation(dataset, battery_model)
 
+    console.footer
 
 
 if __name__ == "__main__":

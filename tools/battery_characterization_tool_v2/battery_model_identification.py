@@ -1,15 +1,16 @@
+#!/usr/bin/env python3
+
 from pathlib import Path
 import numpy as np
 import tomllib
 import sys
 import argparse
-
 import matplotlib.pyplot as plt
-from dataset.battery_profile import cut_charging_phase, cut_discharging_phase, get_mean_temp
-from dataset.battery_dataset import BatteryDataset
-from utils.console_formatter import ConsoleFormatter
 
-from battery_model import (
+from dataset.battery_dataset import BatteryDataset
+from dataset.battery_profile import cut_charging_phase, cut_discharging_phase, get_mean_temp
+
+from models.identification import (
     identify_r_int,
     identify_ocv_curve,
     fit_ocv_curve,
@@ -17,15 +18,19 @@ from battery_model import (
     estimate_r_int,
     estimate_ocv_curve,
 )
-from generate_c_library import generate_battery_libraries
-from fuel_gauge.battery_model import (
+
+from models.battery_model import (
     BatteryModel,
     save_battery_model_to_json,
 )
 
+from utils.c_lib_generator import generate_battery_libraries
+from utils.console_formatter import ConsoleFormatter
+
 # Global console formatter instance
 console = ConsoleFormatter()
 
+BATTERY_MODEL_CONFIG_FILE_DIR = Path(__file__).parent / "models" / "battery_models"
 DEFAULT_MAX_CHARGE_VOLTAGE = 3.9
 DEFAULT_MAX_DISCHARGE_VOLTAGE = 3.0
 DEFAULT_OCV_SAMPLES = 100
@@ -58,14 +63,14 @@ def parse_arguments():
     return parser.parse_args()
 
 def prompt_for_config_file():
-    config_dir = Path(__file__).parent / "battery_model" / "models"
+    config_dir = BATTERY_MODEL_CONFIG_FILE_DIR
     toml_files = list(config_dir.glob("*.toml"))
 
     if not toml_files:
-        console.error("No .toml config files found in 'battery_model/models/'")
+        console.error(f"No battery .toml config files found in '{BATTERY_MODEL_CONFIG_FILE_DIR}'")
         sys.exit(1)
 
-    console.info("Available config files in 'battery_model/models/':")
+    console.info(f"Available config files in '{BATTERY_MODEL_CONFIG_FILE_DIR}':")
     for i, file in enumerate(toml_files, 1):
         console.info(f"  {i}. {file.name}")
 

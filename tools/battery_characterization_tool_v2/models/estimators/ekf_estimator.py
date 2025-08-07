@@ -1,12 +1,8 @@
 
-import matplotlib.pyplot as plt
-import numpy as np
-from .battery_model import BatteryModel
-
 class EkfEstimator():
 
     def __init__(self,
-                 battery_model : BatteryModel,
+                 battery_model,
                  R=None,
                  Q=None,
                  R_agressive=None,

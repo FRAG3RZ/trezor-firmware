@@ -1,9 +1,7 @@
 
-from .battery_model import BatteryModel
-
 class CoulombCounterEstimator():
 
-    def __init__(self, battery_model:BatteryModel, label=None):
+    def __init__(self, battery_model, label=None):
 
         self.name = "Coulomb Counter Estimator"
         if label is not None:

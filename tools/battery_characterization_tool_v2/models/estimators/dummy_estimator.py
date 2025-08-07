@@ -1,12 +1,8 @@
 
-import matplotlib.pyplot as plt
-import numpy as np
-from .battery_model import BatteryModel
-
 class DummyEstimator():
 
     def __init__(self,
-                 battery_model : BatteryModel,
+                 battery_model,
                  label=None):
 
         # Batery model consis of characterized battery data
