@@ -159,34 +159,30 @@ def run_simulation(dataset: BatteryDataset, battery_model: BatteryModel):
     dummy_est = DummyEstimator(battery_model=battery_model)
     console.info("Dummy estimator")
 
-    # EKF parameters tuned for ~1s sampling rate
-    ekf_est_1s = EkfEstimator(
+    ekf_est = EkfEstimator(
         battery_model=battery_model,
         R=2000,
         Q=0.001,
         Q_agressive=0.001,
         R_agressive=1000,
         P_init=0.1,
-        label="1s sampling"
     )
-    console.info(f"EKF estimator 1s [R={ekf_est_1s.R}, Q={ekf_est_1s.Q}, "
-                 f"Q_agressive={ekf_est_1s.Q_agressive}, R_agressive={ekf_est_1s.R_agressive}, "
-                 f"P_init={ekf_est_1s.P_init}]")
+    console.info(f"EKF estimator [R={ekf_est.R}, Q={ekf_est.Q}, "
+                 f"Q_agressive={ekf_est.Q_agressive}, R_agressive={ekf_est.R_agressive}, "
+                 f"P_init={ekf_est.P_init}]")
 
-    # EKF parameters scaled for 300ms sampling rate (FW target)
-    ekf_est_300ms = EkfEstimator(
+    ekf_est2 = EkfEstimator(
         battery_model=battery_model,
-        R=2000,              # Measurement noise unchanged
-        Q=0.0003,            # Process noise scaled: 0.001 * (300/1000)
-        Q_agressive=0.0003,  # Aggressive process noise scaled
-        R_agressive=1000,    # Measurement noise unchanged
+        R=2000,
+        Q=0.001,
+        Q_agressive=0.001,
+        R_agressive=1000,
         P_init=0.1,
-        label="300ms sampling (FW)"
     )
 
-    console.info(f"EKF estimator 300ms [R={ekf_est_300ms.R}, Q={ekf_est_300ms.Q}, "
-                 f"Q_agressive={ekf_est_300ms.Q_agressive}, R_agressive={ekf_est_300ms.R_agressive},"
-                 f"P_init={ekf_est_300ms.P_init}]")
+    console.info(f"EKF estimator 2 [R={ekf_est2.R}, Q={ekf_est2.Q}, "
+                 f"Q_agressive={ekf_est2.Q_agressive}, R_agressive={ekf_est2.R_agressive},"
+                 f"P_init={ekf_est2.P_init}]")
 
     console.subsection("Running simulations")
 
@@ -200,10 +196,10 @@ def run_simulation(dataset: BatteryDataset, battery_model: BatteryModel):
 
         cc_result = run_battery_simulation(data, coulomb_counter_est)
         dm_result = run_battery_simulation(data, dummy_est)
-        ekf_result_1s = run_battery_simulation(data, ekf_est_1s)
-        ekf_result_300ms = run_battery_simulation(data, ekf_est_300ms)
+        ekf_result = run_battery_simulation(data, ekf_est)
+        ekf2_result = run_battery_simulation(data, ekf_est2)
 
-        fig = generate_sim_res_fig(waveform, sim_name, cc_result, dm_result, ekf_result_1s, ekf_result_300ms)
+        fig = generate_sim_res_fig(waveform, sim_name, cc_result, dm_result, ekf_result, ekf2_result)
 
         # Save as pickle format for reopening in Python
         with open(f"{pickle_dir / sim_name}.pkl", 'wb') as f:
