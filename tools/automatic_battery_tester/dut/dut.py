@@ -3,6 +3,8 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+import serial.tools.list_ports
+import re
 
 import serial
 from hardware_ctl.relay_controller import RelayController
@@ -57,11 +59,23 @@ class Dut:
         self.verbose = verbose
         self.relay_port = relay_port
 
+        if(usb_port is None and cpu_id is None):
+            logging.debug(f"Initializing DUT {self.name} on USB port {usb_port}")
+
         # Power up the device with relay controller
-        self.power_up()
+        #self.power_up()
 
         # Wait for device to boot up
         time.sleep(3)
+
+        # If usb_port not given, try to auto-detect
+        if usb_port is None:
+            detected_port, cpu_id_internal = self.find_usb_port(cpu_id_expected=cpu_id)
+            if detected_port is None:
+                self.init_error()
+                raise RuntimeError(f"Could not find USB port for DUT {name} with CPU ID {cpu_id}")
+            usb_port = detected_port
+            logging.info(f"Auto-detected USB port for {name}: {usb_port}")
 
         self.vcp = serial.Serial(
             port=usb_port,
@@ -76,7 +90,7 @@ class Dut:
             raise RuntimeError(f"Failed to open serial port {usb_port} for DUT {name}")
 
         self.entry_interactive_mode()
-        self.enable_charging()
+        #self.enable_charging()
         self.set_backlight(100)
 
         time.sleep(2)  # Give some time to process te commands
@@ -113,8 +127,8 @@ class Dut:
             )
 
         self.display_ok()
-        self.disable_charging()
-        self.power_down()
+        #self.disable_charging()
+        #self.power_down()
 
     def init_error(self):
         self.display_error()
@@ -212,7 +226,7 @@ class Dut:
         if not 0 <= soc_limit <= 100:
             raise ValueError("SoC limit must be between 0 and 100.")
 
-        response = self.send_command("pm-set-soc-limit", soc_limit)
+        response = self.send_command("pm-set-soc-target", soc_limit)
         return response.OK
 
     def set_backlight(self, value: int):
@@ -341,6 +355,7 @@ class Dut:
             output_directory
             / f"{self.cpu_id_hash}.{test_time_id}.{test_scenario}.{test_phase}.{temp}.csv"
         )
+        print(test_scenario, test_phase, temp, file_path)
 
         report = None
         try:
@@ -396,3 +411,61 @@ class Dut:
                 self.close()
         except Exception as e:
             logging.warning(f"Error during DUT cleanup: {e}")
+
+    @staticmethod
+    def strip_ansi_codes(s):
+        ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+        return ansi_escape.sub('', s)
+
+    def find_usb_port(self, cpu_id_expected=None):
+        ports = list(serial.tools.list_ports.comports())
+        print(f"Scanning {len(ports)} serial ports...")
+
+        for port_info in ports:
+            print(f"Checking port: {port_info.device}")
+            try:
+                with serial.Serial(
+                    port=port_info.device,
+                    baudrate=BAUDRATE_DEFAULT,
+                    timeout=0.05  # short read timeout
+                ) as ser:
+                    # Small pause to allow port to settle
+                    time.sleep(0.02)
+                    ser.reset_input_buffer()
+
+                    # Send command
+                    ser.write(b"get-cpuid\n")
+                    ser.flush()
+
+                    # Read response quickly
+                    start_time = time.time()
+                    response = b""
+                    while time.time() - start_time < 0.2:  # total wait max 200 ms
+                        if ser.in_waiting:
+                            response += ser.read(ser.in_waiting)
+                        if b"OK " in response:
+                            break
+                        time.sleep(0.01)  # avoid busy loop
+
+                    if not response:
+                        print(f"No response from {port_info.device}")
+                        continue
+
+                    # Parse response
+                    response_lines = response.decode(errors="ignore").splitlines()
+                    for line in response_lines:
+                        line_no_ansi = self.strip_ansi_codes(line).strip()
+                        if line_no_ansi.startswith("OK "):
+                            detected_cpu_id = line_no_ansi.split(" ", 1)[1].strip()
+                            if cpu_id_expected and detected_cpu_id != cpu_id_expected.strip():
+                                print(f"CPU ID mismatch on {port_info.device}")
+                                break
+                            print(f"Detected CPU ID: {detected_cpu_id} on port {port_info.device}")
+                            return port_info.device, detected_cpu_id
+
+            except Exception as e:
+                print(f"Skipping {port_info.device}: {e}")
+
+        return None, None
+
+
