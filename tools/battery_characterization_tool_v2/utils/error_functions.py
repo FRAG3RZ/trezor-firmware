@@ -391,7 +391,7 @@ def summarize_simulation_errors(
     summary_df.to_csv(summary_path, index=False)
     print(f"\nSummary saved to: {summary_path}", flush=True)
 
-    # ---- Combined EKF metric (2×SOC + 1×Slope) ----
+    # ---- Combined EKF metric (2×SOC + 1×Slope) ---- =
     for est in estimators_to_plot:
         slope_col = f"avg_{est}_slope_error"
         soc_col = f"avg_{est}_end_soc_error"
