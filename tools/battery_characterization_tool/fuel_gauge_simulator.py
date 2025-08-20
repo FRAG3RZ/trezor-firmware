@@ -2,6 +2,8 @@
 
 import pickle
 from pathlib import Path
+import numpy as np
+import pandas as pd
 
 import matplotlib.pyplot as plt
 from dataset.battery_dataset import BatteryDataset
@@ -13,6 +15,7 @@ from models.battery_model import BatteryModel, load_battery_model_from_hash
 from models.estimators import CoulombCounterEstimator, DummyEstimator, EkfEstimator
 from models.simulator import run_battery_simulation
 from utils.console_formatter import ConsoleFormatter
+from utils.error_functions import summarize_simulation_errors
 
 DEBUG = False
 BATTERY_MODEL_JSON_PATH = Path("exported_data/battery_models/")
@@ -22,7 +25,6 @@ SIMULATION_MODES = ["charging", "discharging", "random_wonder"]
 
 # Global console formatter instance
 console = ConsoleFormatter()
-
 
 def prompt_for_dataset() -> BatteryDataset:
     """Prompt user to select a dataset from a DATASET_DIRECTORY and load it
@@ -121,6 +123,32 @@ def generate_sim_res_fig(waveform, sim_name, *sim_results) -> Figure:
             sr.soc[sr.start_idx : sr.end_idx],
             label=sr.model_name,
         )
+    
+    #Plot linear deviation line if available
+    for sr in sim_results:
+        if sr.deviation_error is not None:
+            x_start = sr.deviation_error.get("t_start")
+            y_start = sr.deviation_error.get("soc_start")
+            x_end = sr.deviation_error.get("t_stop")
+            y_end = sr.deviation_error.get("soc_end")
+
+            #print(f"Linear deviation line coordinates: ({time_to_minutes(x_start, wd.time[0])}, {y_start}) -> ({time_to_minutes(x_end, wd.time[0])}, {y_end})")
+
+            # Only plot if all coordinates are valid numbers
+            if None not in (x_start, y_start, x_end, y_end):
+                ax[2].plot(
+                    [time_to_minutes(x_start, wd.time[0]), time_to_minutes(x_end, wd.time[0])],
+                    [y_start, y_end],
+                    color="purple",
+                    linestyle="-",
+                    linewidth=2,
+                    label=f"Linear deviation line - cummulative error: {sr.deviation_error.get('cumulative_error', 'N/A')}"
+                )
+            else:
+                print("Skipping linear deviation line due to missing values")
+
+            break  # Only plot once
+
     ax[2].set_title("Estimated SoC")
     ax[2].set_xlabel("Time [min]")
     ax[2].set_ylabel("SoC [%]")
@@ -138,13 +166,33 @@ def generate_sim_res_fig(waveform, sim_name, *sim_results) -> Figure:
 
     return fig
 
+def run_simulations_for_R_Q(dataset, battery_model, R_min, R_max, R_count, Q_min, Q_max, Q_count, display_fig, display_progress):
+    R_values = np.linspace(R_min, R_max, R_count)
+    Q_values = np.linspace(Q_min, Q_max, Q_count)
 
-def run_simulation(dataset: BatteryDataset, battery_model: BatteryModel):
+    total_runs = len(R_values) * len(Q_values)
+    run_count = 0
+
+    for R in R_values:
+        for Q in Q_values:
+            console.progress(
+                f"Running R-Q grid search → R={R:.5f}, Q={Q:.5f}",
+                step=run_count,
+                total=total_runs,
+            )
+            run_count += 1
+            run_simulation(dataset, battery_model, R, Q, R, Q, P_init=0.1, display_fig=display_fig, display_progress=display_progress)
+
+
+def run_simulation(dataset: BatteryDataset, battery_model: BatteryModel, 
+                   R_value=None, Q_value=None, R_aggressive=None, Q_aggressive=None, P_init=0.1, display_fig=True, display_progress=True):
+    
+    error_results = []
 
     console.section("Running battery simulation")
     # Create output directory based on battery model hash
     model_hash = battery_model.get_hash()
-    output_dir = OUTPUT_DIRECTORY / model_hash
+    output_dir = OUTPUT_DIRECTORY / model_hash / f"R-{R_value}_Q-{Q_value}"
     output_dir.mkdir(parents=True, exist_ok=True)
     pickle_dir = output_dir / "pickles"
     pickle_dir.mkdir(parents=True, exist_ok=True)
@@ -163,12 +211,11 @@ def run_simulation(dataset: BatteryDataset, battery_model: BatteryModel):
 
     ekf_est = EkfEstimator(
         battery_model=battery_model,
-        R=2000,
-        Q=0.005,
-        Q_agressive=0.005,
-        R_agressive=1200,
-        P_init=0.1,
-        label="1",
+        R=R_value,
+        Q=Q_value,
+        Q_agressive=Q_aggressive,
+        R_agressive=R_aggressive,
+        P_init=P_init,
     )
     console.info(
         f"EKF estimator [R={ekf_est.R}, Q={ekf_est.Q}, "
@@ -178,12 +225,11 @@ def run_simulation(dataset: BatteryDataset, battery_model: BatteryModel):
 
     ekf_est2 = EkfEstimator(
         battery_model=battery_model,
-        R=2000,
-        Q=0.01,
-        Q_agressive=0.01,
-        R_agressive=1000,
-        P_init=0.1,
-        label="2",
+        R=R_value,
+        Q=Q_value,
+        Q_agressive=Q_aggressive,
+        R_agressive=R_aggressive,
+        P_init=P_init,
     )
 
     console.info(
@@ -204,31 +250,88 @@ def run_simulation(dataset: BatteryDataset, battery_model: BatteryModel):
             f"{waveform['temperature']}"
         )
 
-        cc_result = run_battery_simulation(data, coulomb_counter_est)
-        dm_result = run_battery_simulation(data, dummy_est)
-        ekf_result = run_battery_simulation(data, ekf_est)
-        ekf2_result = run_battery_simulation(data, ekf_est2)
+        ekf_result = None
+        ekf2_result = None
 
-        fig = generate_sim_res_fig(
-            waveform, sim_name, cc_result, dm_result, ekf_result, ekf2_result
-        )
+        ekf_result = run_battery_simulation(data, ekf_est, battery_model=battery_model, sim_name=sim_name)
 
-        # Save as pickle format for reopening in Python
-        with open(f"{pickle_dir / sim_name}.pkl", "wb") as f:
-            pickle.dump(fig, f)
+        if(display_fig):
+            cc_result = run_battery_simulation(data, coulomb_counter_est, battery_model=battery_model, sim_name=sim_name)
+            dm_result = run_battery_simulation(data, dummy_est, battery_model=battery_model, sim_name=sim_name)
 
-        # Also save as PNG for viewing
-        fig.savefig(f"{output_dir / sim_name}.png", dpi=300, bbox_inches="tight")
+            ekf2_result = run_battery_simulation(data, ekf_est2, battery_model=battery_model, sim_name=sim_name)
 
-        # Close figure to free memory
-        plt.close(fig)
+            fig = generate_sim_res_fig(
+                waveform, sim_name, cc_result, dm_result, ekf_result, ekf2_result
+            )
 
+            # Save as pickle format for reopening in Python
+            with open(f"{pickle_dir / sim_name}.pkl", "wb") as f:
+                pickle.dump(fig, f)
+
+            # Also save as PNG for viewing
+            fig.savefig(f"{output_dir / sim_name}.png", dpi=300, bbox_inches="tight")
+
+            # Close figure to free memory
+            plt.close(fig)
+        
+        #Collect error results
+        if battery_model is not None:
+            slope_err_ekf1 = ekf_result.error if ekf_result is not None else None 
+            slope_err_ekf2 = ekf2_result.error if ekf2_result is not None else None
+            end_soc_err_ekf1 = ekf_result.error_soc if ekf_result is not None else None
+            end_soc_err_ekf2 = ekf2_result.error_soc if ekf2_result is not None else None
+            deviation_error_ekf1 = ekf_result.deviation_error if ekf_result is not None else None
+            deviation_error_ekf2 = ekf2_result.deviation_error if ekf2_result is not None else None
+
+            error_results.append({
+                "file": sim_name,
+                "R": R_value,
+                "R_aggressive": R_aggressive,
+                "Q": Q_value,
+                "Q_aggressive": Q_aggressive,
+
+                # Slope errors (EKF1)
+                "avg_ekf1_slope_error": slope_err_ekf1["avg_error"] if slope_err_ekf1 is not None else None,
+                "rms_ekf1_slope_error": slope_err_ekf1["rms_error"] if slope_err_ekf1 is not None else None,
+                "max_ekf1_slope_error": slope_err_ekf1["max_error"] if slope_err_ekf1 is not None else None,
+                "ekf1_slope_error": slope_err_ekf1["cumulative_error"] if slope_err_ekf1 is not None else None,
+                "valid_points_ekf1_slope": slope_err_ekf1["valid_points"] if slope_err_ekf1 is not None else None,
+
+                # Slope errors (EKF2)
+                "avg_ekf2_slope_error": slope_err_ekf2["avg_error"] if slope_err_ekf2 is not None else None,
+                "rms_ekf2_slope_error": slope_err_ekf2["rms_error"] if slope_err_ekf2 is not None else None,
+                "max_ekf2_slope_error": slope_err_ekf2["max_error"] if slope_err_ekf2 is not None else None,
+                "ekf2_slope_error": slope_err_ekf2["cumulative_error"] if slope_err_ekf2 is not None else None,
+                "valid_points_ekf2_slope": slope_err_ekf2["valid_points"] if slope_err_ekf2 is not None else None,
+
+                # End-of-cycle errors (EKF1)
+                "ekf1_end_soc_error": end_soc_err_ekf1 if end_soc_err_ekf1 is not None else None,
+
+                # End-of-cycle errors (EKF2)
+                "ekf2_end_soc_error": end_soc_err_ekf2 if end_soc_err_ekf2 is not None else None,
+
+                # Deviation error (EKF1)
+                "ekf1_deviation_error": deviation_error_ekf1["cumulative_error"] if deviation_error_ekf1 is not None else None,
+                "mean_ekf1_deviation_error": deviation_error_ekf1["mean_error"] if deviation_error_ekf1 is not None else None,
+
+                # Deviation error (EKF2)
+                "ekf2_deviation_error": deviation_error_ekf2["cumulative_error"] if deviation_error_ekf2 is not None else None,
+                "mean_ekf2_deviation_error": deviation_error_ekf2["mean_error"] if deviation_error_ekf2 is not None else None
+            })
+        
         # Progress indicator
-        console.progress(
-            f" Simulation: {waveform['battery_id']}.{waveform['timestamp_id']}.{waveform['temperature']}°C",
-            step=idx + 1,
-            total=len(simulation_data),
-        )
+        if(display_progress):
+            console.progress(
+                f" Simulation: {waveform['battery_id']}.{waveform['timestamp_id']}.{waveform['temperature']}°C",
+                step=idx + 1,
+                total=len(simulation_data),
+            )
+        
+    # Save all results to CSV
+    results_df = pd.DataFrame(error_results)
+    results_csv = OUTPUT_DIRECTORY / f"error_results_R-{R_value}_Q-{Q_value}.csv"
+    results_df.to_csv(results_csv, index=False)
 
     console.success("Simulation completed.")
 
@@ -242,7 +345,15 @@ def main():
 
     dataset = prompt_for_dataset()
 
-    run_simulation(dataset, battery_model)
+    #run_simulations_for_R_Q(dataset, battery_model, R_min=1000, R_max=1300, R_count=4, Q_min=0.0005, Q_max=0.002, Q_count=4, display_fig=True, display_progress=False)
+    #run_simulations_for_R_Q(dataset, battery_model, R_min=700, R_max=900, R_count=3, Q_min=0.0005, Q_max=0.002, Q_count=4, display_fig=False, display_progress=False)
+    #run_simulations_for_R_Q(dataset, battery_model, R_min=1400, R_max=1700, R_count=4, Q_min=0.0005, Q_max=0.002, Q_count=4, display_fig=False, display_progress=False)
+    #run_simulations_for_R_Q(dataset, battery_model, R_min=1700, R_max=2200, R_count=5, Q_min=0.0005, Q_max=0.003, Q_count=11, display_fig=False, display_progress=False)
+    run_simulations_for_R_Q(dataset, battery_model, R_min=700, R_max=1600, R_count=10, Q_min=0.00075, Q_max=0.00075, Q_count=1, display_fig=False, display_progress=False)
+    run_simulations_for_R_Q(dataset, battery_model, R_min=700, R_max=1600, R_count=10, Q_min=0.00125, Q_max=0.00125, Q_count=1, display_fig=False, display_progress=False)
+    run_simulations_for_R_Q(dataset, battery_model, R_min=700, R_max=1600, R_count=10, Q_min=0.00175, Q_max=0.00175, Q_count=1, display_fig=False, display_progress=False)
+
+    summarize_simulation_errors(OUTPUT_DIRECTORY)
 
     console.footer()
 

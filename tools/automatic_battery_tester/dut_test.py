@@ -5,8 +5,8 @@ from dut.dut import Dut  # change to actual import path
 logging.basicConfig(level=logging.DEBUG)
 
 if __name__ == "__main__":
-    known_cpu_id = "0F0017000950325557323120"
-    second_known_cpu_id = "12002E000A50325557323120"
+    known_cpu_id = "1C0017000950325557323120"
+    #second_known_cpu_id = "12002E000A50325557323120"
 
     dut = Dut(
                     name="test_name",
@@ -16,8 +16,9 @@ if __name__ == "__main__":
                     relay_ctl=1,
                     verbose=True,
                 )
-    
-    dut = Dut(
+    print(f"{known_cpu_id} hash is: {dut.cpu_id_hash}")
+    """
+    dut2 = Dut(
                     name="test_name_2",
                     cpu_id=second_known_cpu_id,
                     #usb_port=d["usb_port"],
@@ -25,8 +26,9 @@ if __name__ == "__main__":
                     relay_ctl=1,
                     verbose=True,
                 )
-    """
-
+    
+    print(f"{second_known_cpu_id} hash is: {dut.cpu_id_hash}")
+    
     # Create a Dut instance without running __init__
     dummy_dut = Dut.__new__(Dut)
 
