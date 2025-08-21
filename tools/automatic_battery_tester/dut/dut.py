@@ -14,6 +14,8 @@ BYTESIZE_DEFAULT = 8
 PARITY_DEFAULT = serial.PARITY_NONE
 CMD_TIMEOUT = 10
 
+#Keep false for normal operation - set true for running DUT finder
+FINDING_DUTS = True
 
 @dataclass
 class DutReportData:
@@ -63,19 +65,26 @@ class Dut:
             logging.debug(f"Initializing DUT {self.name} on USB port {usb_port}")
 
         # Power up the device with relay controller
-        #self.power_up()
+        if not FINDING_DUTS:
+            self.power_up()
 
         # Wait for device to boot up
         time.sleep(3)
 
+        #Assign CPU ID 
+        if cpu_id is not None:
+            self.cpu_id_hash = self.generate_id_hash(cpu_id)
+
         # If usb_port not given, try to auto-detect
         if usb_port is None:
-            detected_port, cpu_id_internal = self.find_usb_port(cpu_id_expected=cpu_id)
+            detected_port, self.cpu_id = self.find_usb_port(cpu_id_expected=cpu_id)
             if detected_port is None:
                 self.init_error()
                 raise RuntimeError(f"Could not find USB port for DUT {name} with CPU ID {cpu_id}")
             usb_port = detected_port
-            logging.info(f"Auto-detected USB port for {name}: {usb_port}")
+            self.cpu_id_hash = self.generate_id_hash(self.cpu_id)
+            cpu_id = self.cpu_id
+            print(f"Auto-detected port for {name}, cpud_id: {self.cpu_id}, hash: {self.cpu_id_hash}, USB port: {usb_port}")
 
         self.vcp = serial.Serial(
             port=usb_port,
@@ -90,7 +99,8 @@ class Dut:
             raise RuntimeError(f"Failed to open serial port {usb_port} for DUT {name}")
 
         self.entry_interactive_mode()
-        #self.enable_charging()
+        if not FINDING_DUTS: 
+            self.enable_charging()
         self.set_backlight(100)
 
         time.sleep(2)  # Give some time to process te commands
@@ -99,14 +109,11 @@ class Dut:
             self.init_error()
             raise RuntimeError(f"DUT {self.name} did not respond to ping command")
 
-        self.cpu_id = self.get_cpuid()
         if self.cpu_id is None:
             self.init_error()
             raise RuntimeError(f"DUT {self.name} failed to retrieve CPU ID")
 
         logging.debug(f"DUT {self.name} initialized with CPU ID: {self.cpu_id}")
-
-        self.cpu_id_hash = self.generate_id_hash(self.cpu_id)
 
         # cpu_id check
         if cpu_id is not None:
@@ -127,8 +134,10 @@ class Dut:
             )
 
         self.display_ok()
-        #self.disable_charging()
-        #self.power_down()
+        if not FINDING_DUTS:
+            self.disable_charging()
+        else:
+            response = self.send_command("prodtest-homescreen")
 
     def init_error(self):
         self.display_error()
@@ -226,7 +235,7 @@ class Dut:
         if not 0 <= soc_limit <= 100:
             raise ValueError("SoC limit must be between 0 and 100.")
 
-        response = self.send_command("pm-set-soc-target", soc_limit)
+        response = self.send_command("pm-set-soc-limit", soc_limit)
         return response.OK
 
     def set_backlight(self, value: int):
@@ -460,7 +469,6 @@ class Dut:
                             if cpu_id_expected and detected_cpu_id != cpu_id_expected.strip():
                                 print(f"CPU ID mismatch on {port_info.device}")
                                 break
-                            print(f"Detected CPU ID: {detected_cpu_id} on port {port_info.device}")
                             return port_info.device, detected_cpu_id
 
             except Exception as e:

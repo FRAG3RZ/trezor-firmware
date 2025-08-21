@@ -133,7 +133,7 @@ def run_test_cycle(
         if finished:
             break  # Exit test loop
 
-        time.sleep(1)
+        time.sleep(config["general"]["log_interval_seconds"])
 
     # Tear down test scenario
     test_scenario.teardown(dut_controller=dut_ctl)

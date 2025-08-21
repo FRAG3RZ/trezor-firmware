@@ -66,18 +66,15 @@ class DutController:
             self.relay_ctl.set_relay_off(d["relay_port"])
 
         for d in duts:
-
             try:
                 dut = Dut(
                     name=d["name"],
                     cpu_id=d["cpu_id"],
-                    #usb_port=d["usb_port"],
                     relay_port=d["relay_port"],
                     relay_ctl=self.relay_ctl,
                     verbose=verbose,
                 )
                 self.duts.append(dut)
-                #logging.info(f"Initialized {d['name']} on port {d['usb_port']}")
                 logging.info(f" -- cpu_id hash : {dut.get_cpu_id_hash()}")
                 logging.info(f" -- relay port  : {dut.get_relay_port()}")
 

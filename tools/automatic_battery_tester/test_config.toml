@@ -1,7 +1,7 @@
 
 [general]
 
-output_directory = "test_results"
+output_directory = "test_results_HCF343837"
 log_interval_seconds = 1
 
 ################################################################################
@@ -9,22 +9,34 @@ log_interval_seconds = 1
 ################################################################################
 
 [[duts]]
+#hash: 07a7
 name = "DUT1"
-cpu_id = "05001D000A50325557323120"
-usb_port = "/dev/ttyACM0"
+cpu_id = "0A0017000950325557323120"
 relay_port = 1
 
-#[[duts]]
-#name = "DUT2"
-#cpu_id = "1C0023000A50325557323120"
-#usb_port = "/dev/ttyACM0"
+[[duts]]
+#hash: ae4c
+name = "DUT2"
+cpu_id = "1E0018000950325557323120"
 #relay_port = 1
 
-# Uncomment and edit to add more DUTs
-#[[duts]]
-#name = "DUT3"
-#usb_port = "/dev/ttyACM2"
-#relay_port = 3
+[[duts]]
+#hash: 3800
+name = "DUT3"
+cpu_id = "1C0017000950325557323120"
+#relay_port = 1
+
+[[duts]]
+#hash: eb95
+name = "DUT4"
+cpu_id = "210013000A50325557323120"
+#relay_port = 1
+
+[[duts]]
+#hash: 8140
+name = "DUT5"
+cpu_id = "2C0018000950325557323120"
+#relay_port = 1
 
 ################################################################################
 #  RELAY BOADR (DEDITEC) SETTINGS
@@ -39,9 +51,9 @@ ip_address = "192.168.1.10" # Deditec board IP address
 
 [test_plan]
 
-temperatures_celsius = [15, 20, 25, 30, 35, 40, 45] # Temp scenario lists
-cycles_per_temperature = 3
-test_modes = ["linear", "switching", "random_wonder"] # Test modes run in every cycle
+temperatures_celsius = [25, 30, 20, 35, 15, 40, 10, 45, 5, 0, 25] # Temp scenario lists
+cycles_per_temperature = 1
+test_modes = ["linear", "switching"] # Test modes run in every cycle
 
 # Linear test mode parameters
 linear_discharge_load = 0 # could be set in range 0-255
