@@ -8,6 +8,8 @@ from matplotlib.ticker import MaxNLocator
 from scipy.stats import norm
 from matplotlib.lines import Line2D
 import matplotlib.cm as cm
+from InquirerPy import inquirer
+from InquirerPy.base import Choice
 import csv
 from utils import (
     load_measured_data,
@@ -20,6 +22,44 @@ output_dir.mkdir(exist_ok=True)
 invalid_files = []
 
 default_dataset_dir = Path("../test_results")
+
+def inquire_dataset(base_dir="../"):
+    """
+    List available dataset folders and let the user pick one
+    with fuzzy search interaction.
+    """
+    base_path = Path(base_dir)
+    if not base_path.exists():
+        print(f"⚠️ Base directory {base_dir} not found. Using default.")
+        return default_dataset_dir
+
+    # List directories only
+    folders = [f for f in base_path.iterdir() if f.is_dir()]
+    if not folders:
+        print(f"⚠️ No dataset folders found in {base_dir}. Using default.")
+        return default_dataset_dir
+
+    # Build fuzzy-choice list
+    folder_choices = []
+    for f in folders:
+        # Add some extra info: number of files, subfolders
+        num_files = sum(1 for _ in f.glob("**/*") if _.is_file())
+        num_subdirs = sum(1 for _ in f.glob("*/") if _.is_dir())
+        label = f"{f.name} ({num_files} files, {num_subdirs} subfolders)"
+        folder_choices.append(Choice(name=label, value=f))
+
+    # Run fuzzy selection (single choice)
+    try:
+        selected = inquirer.fuzzy(
+            message="Select dataset folder:",
+            choices=folder_choices,
+            multiselect=False,
+            instruction="(Type to search, press <enter> to confirm)",
+        ).execute()
+        return selected
+    except Exception as e:
+        print(f"⚠️ Falling back to default dataset. Reason: {e}")
+        return default_dataset_dir
 
 
 def list_csv_files():
@@ -798,6 +838,10 @@ def plot_mean_ce_vs_temperature(temp_list, temp_groups):
 def main():
 
     invalid_files = []
+
+    global default_dataset_dir
+
+    default_dataset_dir = inquire_dataset("../")
 
     if not default_dataset_dir.exists():
         print(f"Error: directory {default_dataset_dir} not found.")

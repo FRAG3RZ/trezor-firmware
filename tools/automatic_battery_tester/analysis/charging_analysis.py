@@ -6,12 +6,49 @@ from InquirerPy import inquirer
 from InquirerPy.base import Choice
 from utils import load_measured_data
 
-default_dataset_dir = Path("../test_results")
+default_dataset_dir = Path("../TS7_JYH_PFL333838_350_complete")
 # default_dataset_dir = Path("../single_capture_test_results")
 
 battery_thermal_limit = 45.0  # Celsius
 case_thermal_limit = 41.0  # Celsius
 
+def inquire_dataset(base_dir="../"):
+    """
+    List available dataset folders and let the user pick one
+    with fuzzy search interaction.
+    """
+    base_path = Path(base_dir)
+    if not base_path.exists():
+        print(f"⚠️ Base directory {base_dir} not found. Using default.")
+        return default_dataset_dir
+
+    # List directories only
+    folders = [f for f in base_path.iterdir() if f.is_dir()]
+    if not folders:
+        print(f"⚠️ No dataset folders found in {base_dir}. Using default.")
+        return default_dataset_dir
+
+    # Build fuzzy-choice list
+    folder_choices = []
+    for f in folders:
+        # Add some extra info: number of files, subfolders
+        num_files = sum(1 for _ in f.glob("**/*") if _.is_file())
+        num_subdirs = sum(1 for _ in f.glob("*/") if _.is_dir())
+        label = f"{f.name} ({num_files} files, {num_subdirs} subfolders)"
+        folder_choices.append(Choice(name=label, value=f))
+
+    # Run fuzzy selection (single choice)
+    try:
+        selected = inquirer.fuzzy(
+            message="Select dataset folder:",
+            choices=folder_choices,
+            multiselect=False,
+            instruction="(Type to search, press <enter> to confirm)",
+        ).execute()
+        return selected
+    except Exception as e:
+        print(f"⚠️ Falling back to default dataset. Reason: {e}")
+        return default_dataset_dir
 
 def select_mode():
     return inquirer.select(
@@ -633,7 +670,11 @@ def plot_group_by_timestamp(time_id, files_dict, ext_temp_file):
 
 
 def main():
+    global default_dataset_dir
+    
     mode = select_mode()
+
+    default_dataset_dir = inquire_dataset("../")
 
     if mode == "Select individual waveform files":
         selected_waveforms = select_waveforms()
