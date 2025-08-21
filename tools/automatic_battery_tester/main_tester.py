@@ -117,8 +117,12 @@ def run_test_cycle(
     # Setup
     test_scenario.setup(dut_controller=dut_ctl)
 
+    interval = float(config["general"]["log_interval_seconds"])
+
     # Test loop
     while True:
+
+        start_time = time.perf_counter()
 
         # Call run function in loop to execute the test scenario.
         finished = test_scenario.run(dut_controller=dut_ctl)
@@ -133,7 +137,11 @@ def run_test_cycle(
         if finished:
             break  # Exit test loop
 
-        time.sleep(config["general"]["log_interval_seconds"])
+        elapsed = time.perf_counter() - start_time
+        remaining = interval - elapsed
+
+        #Sleep based on the time taken to do the calculations, to maintain consistency
+        time.sleep(remaining)
 
     # Tear down test scenario
     test_scenario.teardown(dut_controller=dut_ctl)
@@ -158,7 +166,7 @@ def main():
     dut_ctl = None
 
     logging.info("==============================================")
-    logging.info("   Initializing Peripherals                   ")
+    logging.info("           Initializing Peripherals           ")
     logging.info("==============================================")
 
     try:
@@ -195,7 +203,7 @@ def main():
     ############################################################################
 
     logging.info("==============================================")
-    logging.info("   TEST PLAN LOADING                          ")
+    logging.info("             TEST PLAN LOADING                ")
     logging.info("==============================================")
 
     temperatures = config["test_plan"].get("temperatures_celsius", [25])
@@ -244,9 +252,14 @@ def main():
                 user_input = input(f"Confirm temperature is set to {temp_c} °C (Y)?")
                 if user_input.lower() == "y":
                     break
-
+            
+            #Make sure they are all discharged before starting the next test
+            dut_ctl.power_down_all() 
+            while not dut_ctl.all_duts_discharged():
+                time.sleep(1)
+ 
             for cycle_num in range(cycles_per_temp):
-
+                
                 for test_mode in test_modes_to_run:
 
                     run_start_time = time.time()
